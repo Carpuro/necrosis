@@ -64,6 +64,7 @@ public class HunterAI : MonoBehaviour
     int patrolIndex;
     float stateTimer;
     float attackTimer;
+    float flankSide; // +1 = derecha del jugador, -1 = izquierda; se elige al entrar en Flank
     Vector3 investigatePoint;
     bool subscribed;
 
@@ -86,7 +87,10 @@ public class HunterAI : MonoBehaviour
             DayNightCycle.Instance.OnPhaseChanged += OnPhaseChanged;
             subscribed = true;
             // Estado inicial coherente con la hora de arranque
-            if (DayNightCycle.Instance.IsNight) EnterStatue();
+            // (en Dusk ya están congelados: el evento Dusk->Statue ocurrió "antes de empezar")
+            var phase = DayNightCycle.Instance.CurrentPhase;
+            if (phase == DayNightCycle.Phase.Night || phase == DayNightCycle.Phase.Dusk)
+                EnterStatue();
         }
     }
 
@@ -109,6 +113,7 @@ public class HunterAI : MonoBehaviour
             case DayNightCycle.Phase.Dawn:
                 // MAREA DEL ALBA: despierta con reserva llena y hambre acumulada
                 agent.isStopped = false;
+                if (player == null) { SetState(State.Patrol); break; }
                 if (PlayerVisible() || DistanceToPlayer() < visionRange * 1.5f)
                     SetState(State.Flank); // te huele: va por ti sin haberte visto bien
                 else
@@ -162,7 +167,8 @@ public class HunterAI : MonoBehaviour
         }
 
         // Patrullar puntos o deambular
-        if (!agent.hasPath || agent.remainingDistance < 0.6f)
+        // (remainingDistance reporta 0 mientras el path se calcula: esperar pathPending)
+        if (!agent.pathPending && (!agent.hasPath || agent.remainingDistance < 0.6f))
         {
             if (patrolPoints != null && patrolPoints.Length > 0)
             {
@@ -188,7 +194,7 @@ public class HunterAI : MonoBehaviour
             SetState(Random.value < flankChance ? State.Flank : State.Attack);
             return;
         }
-        if (agent.remainingDistance < 1f && stateTimer > 2f)
+        if (!agent.pathPending && agent.remainingDistance < 1f && stateTimer > 2f)
             SetState(State.Patrol); // no encontró nada
     }
 
@@ -196,8 +202,10 @@ public class HunterAI : MonoBehaviour
     {
         agent.speed = baseChaseSpeed * solar;
 
-        // Punto de flanqueo: al costado/espalda del jugador respecto a su mirada
-        Vector3 side = (Random.value < 0.5f ? player.right : -player.right);
+        // Punto de flanqueo: al costado/espalda del jugador respecto a su mirada.
+        // El costado (flankSide) se eligió UNA vez al entrar al estado; re-sortearlo
+        // cada frame hacía que el agente zigzagueara sin rodear nunca.
+        Vector3 side = player.right * flankSide;
         Vector3 flankTarget = player.position + (side - player.forward).normalized * flankDistance;
 
         if (NavMesh.SamplePosition(flankTarget, out NavMeshHit hit, flankDistance, NavMesh.AllAreas))
@@ -206,7 +214,8 @@ public class HunterAI : MonoBehaviour
             agent.SetDestination(player.position);
 
         // Llegó al costado (o simplemente ya está encima): a matar
-        if (DistanceToPlayer() < attackRange * 2.2f || agent.remainingDistance < 1.2f)
+        if (DistanceToPlayer() < attackRange * 2.2f ||
+            (!agent.pathPending && agent.remainingDistance < 1.2f))
             SetState(State.Attack);
 
         if (DistanceToPlayer() > visionRange * 1.6f)
@@ -327,6 +336,8 @@ public class HunterAI : MonoBehaviour
 
     void SetState(State s)
     {
+        if (s == State.Flank)
+            flankSide = Random.value < 0.5f ? 1f : -1f;
         CurrentState = s;
         stateTimer = 0f;
     }

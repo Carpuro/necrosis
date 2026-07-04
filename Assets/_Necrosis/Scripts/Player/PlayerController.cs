@@ -27,11 +27,13 @@ public class PlayerController : MonoBehaviour
     CharacterController controller;
     float verticalVelocity;
     float normalHeight;
+    float normalCenterY;
 
     void Awake()
     {
         controller = GetComponent<CharacterController>();
         normalHeight = controller.height;
+        normalCenterY = controller.center.y;
         if (cameraTransform == null && Camera.main != null)
             cameraTransform = Camera.main.transform;
     }
@@ -53,9 +55,14 @@ public class PlayerController : MonoBehaviour
         else if (wantsRun) CurrentState = MoveState.Run;
         else CurrentState = MoveState.Walk;
 
-        // Altura del collider al agacharse
+        // Altura del collider al agacharse.
+        // El centro baja la mitad de lo que baja la altura para que los pies
+        // sigan en el suelo (si no, la cápsula encoge flotando alrededor del centro).
         float targetHeight = wantsCrouch ? normalHeight * 0.55f : normalHeight;
         controller.height = Mathf.Lerp(controller.height, targetHeight, 10f * Time.deltaTime);
+        Vector3 center = controller.center;
+        center.y = normalCenterY - (normalHeight - controller.height) * 0.5f;
+        controller.center = center;
 
         // --- Movimiento relativo a cámara ---
         Vector3 move = Vector3.zero;

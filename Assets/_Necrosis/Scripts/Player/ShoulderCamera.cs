@@ -59,13 +59,19 @@ public class ShoulderCamera : MonoBehaviour
         Vector3 desiredPos = pivot - rotation * Vector3.forward * currentDistance;
 
         // --- Colisión: no atravesar paredes ---
+        // Se ignoran los colliders del propio jugador (con collisionMask = ~0 el
+        // SphereCast puede pescar su cápsula y pegar la cámara a su espalda).
         Vector3 dir = desiredPos - pivot;
         float dist = dir.magnitude;
-        if (Physics.SphereCast(pivot, collisionRadius, dir.normalized,
-            out RaycastHit hit, dist, collisionMask, QueryTriggerInteraction.Ignore))
+        float closest = dist;
+        foreach (var hit in Physics.SphereCastAll(pivot, collisionRadius, dir.normalized,
+            dist, collisionMask, QueryTriggerInteraction.Ignore))
         {
-            desiredPos = pivot + dir.normalized * (hit.distance - 0.05f);
+            if (hit.transform.root == target.root) continue;
+            if (hit.distance < closest) closest = hit.distance;
         }
+        if (closest < dist)
+            desiredPos = pivot + dir.normalized * (closest - 0.05f);
 
         transform.position = desiredPos;
         transform.rotation = rotation;

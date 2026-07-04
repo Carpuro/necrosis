@@ -53,6 +53,13 @@ public class DayNightCycle : MonoBehaviour
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
+
+        // Calcular fase, sol y factor solar de inmediato: los Cazadores leen
+        // CurrentPhase en su Start(), antes del primer Update de este script.
+        // Sin esto, arrancar con timeOfDay nocturno reportaría fase "Day".
+        UpdatePhase();
+        UpdateSun();
+        UpdateSolarFactor();
     }
 
     void Update()

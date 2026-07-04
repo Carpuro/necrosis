@@ -34,6 +34,7 @@ public class ChorusAudio : MonoBehaviour
     {
         source = GetComponent<AudioSource>();
         source.loop = true;
+        source.volume = 0f; // arrancar en silencio; el Update lo sube suavemente
         if (!source.isPlaying && source.clip != null) source.Play();
     }
 
@@ -48,7 +49,9 @@ public class ChorusAudio : MonoBehaviour
         }
 
         float targetVolume = 0f;
-        float targetPitch = 1f;
+        // Base 0.9 (pitch grave de patrulla); los Max() de caza/frenesí lo suben.
+        // Con base 1.0 el 0.9 de patrulla era inalcanzable.
+        float targetPitch = 0.9f;
 
         foreach (var h in hunters)
         {
