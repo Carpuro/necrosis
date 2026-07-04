@@ -64,3 +64,6 @@ crashlytics-build.properties
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Proyecto accidental de Unity Hub (el proyecto real es la raiz del repo)
+/Necrosis/
