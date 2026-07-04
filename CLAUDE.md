@@ -18,10 +18,14 @@ prueba en `README_FASE0.md`.
 
 ## Estado del proyecto
 
-**FASE 0 (greybox).** El repo contiene solo los scripts + docs; el proyecto de Unity
-(ProjectSettings/, Packages/, escenas, .meta) aún no existe o vive fuera del repo.
-Target: **Unity 6 / 2022.3 LTS**, Input Manager clásico (`Input.GetAxis`/`GetKey`),
-paquete **AI Navigation** para NavMesh. Plantilla 3D (URP).
+**FASE 0 (greybox).** Proyecto de Unity completo y versionado (ProjectSettings/,
+Packages/, .meta). Editor instalado en esta máquina: **Unity 6000.5.2f1**.
+Input Manager clásico (`Input.GetAxis`/`GetKey`); render pipeline built-in por ahora.
+La escena `Assets/_Necrosis/Scenes/Fase0.unity` se genera con
+`Fase0SceneBuilder` (menú *Necrosis > Construir escena Fase 0*, o batchmode con
+`-executeMethod Fase0SceneBuilder.BuildScene`) — editar el builder, no la escena a mano.
+Hito actual: POV + movimiento. Pendiente del builder: Cazadores + NavMesh
+(paquete **AI Navigation**, aún no instalado) y clip de estática para el Coro.
 
 ## Estructura
 
