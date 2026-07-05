@@ -270,7 +270,7 @@ public static class PlayerAnimatorSetup
         toTurn180.AddCondition(AnimatorConditionMode.If, 0, "Turn180");
         toTurn180.hasExitTime = false; toTurn180.duration = 0.08f; toTurn180.canTransitionToSelf = false;
         var fromTurn180 = turn180.AddTransition(loco);
-        fromTurn180.hasExitTime = true; fromTurn180.exitTime = 0.7f; fromTurn180.duration = 0.12f;
+        fromTurn180.hasExitTime = true; fromTurn180.exitTime = 0.92f; fromTurn180.duration = 0.1f;
 
         // Discrete start turn (from idle): 1D blend by TurnInPlace select value:
         // -2 180-left · -1 90-left · 0 idle · +1 90-right · +2 180-right.

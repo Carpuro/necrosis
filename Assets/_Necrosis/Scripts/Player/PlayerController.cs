@@ -454,9 +454,17 @@ public class PlayerController : MonoBehaviour
     {
         frameMove = Vector3.zero;
         turn180Timer += Time.deltaTime;
-        float t = Mathf.Clamp01(turn180Timer / turn180Duration);
+
+        // Rotate in lockstep with the Turn180 clip (not a fixed timer) so the feet
+        // don't slide — same fix as the discrete turn. Timer fallback during the
+        // crossfade / when there's no model.
+        bool hasProgress = animDriver.TryGetStateProgress("Turn180", out float p);
+        float t = hasProgress ? Mathf.Clamp01(p)
+                              : Mathf.Clamp01(turn180Timer / turn180Duration);
         transform.rotation = Quaternion.Slerp(turn180From, turn180To, t);
-        if (t >= 1f) turning180 = false;
+
+        bool done = hasProgress ? p >= 1f : turn180Timer >= turn180Duration;
+        if (done && turn180Timer >= 0.1f) turning180 = false;
     }
 
     #endregion
