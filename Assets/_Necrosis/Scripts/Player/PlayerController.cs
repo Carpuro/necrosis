@@ -11,7 +11,7 @@ public class PlayerController : MonoBehaviour
 {
     [Header("Velocidades (m/s)")]
     public float crouchSpeed = 1.5f;
-    public float walkSpeed = 3.5f;
+    public float walkSpeed = 2.5f; // ajustado al stride del clip (menos deslizamiento)
     public float runSpeed = 6.5f;
     public float sprintSpeed = 8f;
     [Tooltip("Velocidad al apuntar/strafear (clic derecho), estilo State of Decay.")]

@@ -187,9 +187,9 @@ public static class PlayerAnimatorSetup
         var runR    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_run_turn_right.fbx");
         var runF    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_sprint_straight.fbx");
         tree.AddChild(idle,  new Vector2( 0f, 0f));
-        tree.AddChild(walkS, new Vector2( 0f, 3.5f)); // walk (C off)
-        tree.AddChild(walkL, new Vector2(-1f, 3.5f)); // giro izq caminando
-        tree.AddChild(walkR, new Vector2( 1f, 3.5f)); // giro der caminando
+        tree.AddChild(walkS, new Vector2( 0f, 2.5f)); // walk (C off) = walkSpeed
+        tree.AddChild(walkL, new Vector2(-1f, 2.5f)); // giro izq caminando
+        tree.AddChild(walkR, new Vector2( 1f, 2.5f)); // giro der caminando
         tree.AddChild(runS,  new Vector2( 0f, 6.5f)); // run (C on)
         tree.AddChild(runL,  new Vector2(-1f, 6.5f)); // giro izq corriendo (nativo)
         tree.AddChild(runR,  new Vector2( 1f, 6.5f)); // giro der corriendo (nativo)
