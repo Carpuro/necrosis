@@ -173,8 +173,8 @@ public class PlayerController : MonoBehaviour
 
         UpdateStanceAndAiming();
         UpdateMoveState();
+        UpdateStartTurn();   // before walk-start: a big turn angle wins over the ramp
         UpdateWalkStart();
-        UpdateStartTurn();
         ApplyCrouchHeight();
         HandleMovement();
         ApplyGravityAndMove();
@@ -300,15 +300,13 @@ public class PlayerController : MonoBehaviour
 
         // Only fire when we've been genuinely stopped for a moment, so a reversal
         // or turn right after moving does not count as a fresh start.
+        // Never ramp while a discrete turn is running/queued (turns don't ramp).
         if (prevState == MoveState.Idle && groundMove && !faceCamera && !crouched
-            && !turning180 && idleTime >= walkStartIdleDelay)
+            && !turning180 && !discreteTurning && idleTime >= walkStartIdleDelay)
         {
             walkStartTimer = walkStartDuration;
             startWalkQueued = true;
         }
-
-        // Update the idle timer AFTER the check above.
-        if (moving) idleTime = 0f; else idleTime += Time.deltaTime;
 
         startingWalk = walkStartTimer > 0f;
         if (startingWalk) walkStartTimer -= Time.deltaTime;
@@ -603,6 +601,9 @@ public class PlayerController : MonoBehaviour
         startWalkQueued = false;
         turn180Queued = false;
         prevState = CurrentState;
+        // Idle timer updated at END of frame so start-turn/walk-start both read the
+        // accumulated stand time (not a value already zeroed mid-frame).
+        if (moving) idleTime = 0f; else idleTime += Time.deltaTime;
     }
 
     #endregion
