@@ -38,6 +38,7 @@ public static class Fase0SceneBuilder
     const float ParasiteDamageMult = 1.6f;  // pega más fuerte
     const float ParasiteScale = 1.25f;      // un poco más grande
     const float HunterModelYOffset = -1f;   // baja el modelo para que los pies toquen el suelo
+    const bool SpawnHunters = false;        // Cazadores desactivados por ahora (probar movimiento)
 
     const string PlayerDir = "Assets/_Necrosis/Characters/Player/";
     const string PlayerAnimatorPath = PlayerDir + "PlayerAnimator.controller";
@@ -216,7 +217,9 @@ public static class Fase0SceneBuilder
         steps.runLoop = Footstep("player_walking_road.wav");
         steps.crouchLoop = Footstep("player_crouch_slow_indoors_carpet.wav");
 
-        // --- Cazadores: 4 cápsulas rojas repartidas, deambulan (sin puntos de patrulla) ---
+        // --- Cazadores: desactivados por ahora (Carlos, para probar el movimiento) ---
+        if (SpawnHunters)
+        {
         var hunterMat = AssetDatabase.LoadAssetAtPath<Material>(HunterMatPath);
         if (hunterMat == null)
         {
@@ -256,6 +259,7 @@ public static class Fase0SceneBuilder
             // Modelo rigged (aleatorio, con nivel superior parásito); null-safe
             AttachHunterModel(hunter, ai);
         }
+        } // fin if (SpawnHunters)
 
         // --- Control de misión: objetivo, distancia restante y resultado ---
         var missionGo = new GameObject("Mission");

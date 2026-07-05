@@ -220,12 +220,14 @@ public class PlayerController : MonoBehaviour
             {
                 Vector3 worldDir = (camForward * v + camRight * h).normalized;
 
-                // Giro 180: si inviertes el sentido a buena velocidad, dispara el
-                // giro con animación y rota el cuerpo durante el clip (no de golpe).
-                if (!turning180 && !startingWalk && currentSpeed > 1f &&
+                // Giro 180: si pides una dirección casi opuesta a tu rumbo actual,
+                // dispara el giro con animación y rota el cuerpo durante el clip
+                // (no de golpe). Sin filtro de velocidad: se mide facing vs input.
+                if (!turning180 && !startingWalk &&
                     Vector3.Angle(transform.forward, worldDir) > turn180Threshold)
                 {
                     turning180 = true; turn180Timer = 0f; turn180Queued = true;
+                    startWalkQueued = false; // el 180 tiene prioridad sobre el arranque
                     turn180From = transform.rotation;
                     turn180To = Quaternion.LookRotation(worldDir, Vector3.up);
                 }
