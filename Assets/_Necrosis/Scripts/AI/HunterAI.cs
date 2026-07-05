@@ -185,7 +185,8 @@ public class HunterAI : MonoBehaviour
     void UpdateAnimator()
     {
         if (animator == null) return;
-        animator.SetFloat("Speed", agent.velocity.magnitude);
+        // Amortiguado para que la mezcla suba suave hacia correr al perseguir.
+        animator.SetFloat("Speed", agent.velocity.magnitude, 0.12f, Time.deltaTime);
         animator.SetBool("Statue", CurrentState == State.Statue);
         animator.SetBool("Attacking", CurrentState == State.Attack || CurrentState == State.Frenzy);
     }

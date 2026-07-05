@@ -107,7 +107,9 @@ public class PlayerController : MonoBehaviour
         // --- Animación (opcional): alimenta el Animator si hay un modelo asignado ---
         if (animator != null)
         {
-            animator.SetFloat("Speed", PlanarSpeed);
+            // Amortiguado: el movimiento arranca instantáneo, pero la mezcla de
+            // animación sube suave idle->walk->run ("arranca y luego corre").
+            animator.SetFloat("Speed", PlanarSpeed, 0.12f, Time.deltaTime);
             animator.SetBool("Crouch", CurrentState == MoveState.Crouch);
         }
     }

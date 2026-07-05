@@ -41,7 +41,7 @@ public static class Fase0SceneBuilder
 
     const string PlayerDir = "Assets/_Necrosis/Characters/Player/";
     const string PlayerAnimatorPath = PlayerDir + "PlayerAnimator.controller";
-    const string PlayerModelFile = "model_xbot_tpose.fbx";
+    const string PlayerModelFile = "model_ybot_tpose.fbx"; // coincide con las animaciones (Y Bot)
 
     // La ronda es una carrera de extracción de borde a borde (suelo 100x100).
     static readonly Vector3 PlayerSpawn = new Vector3(0f, 1.1f, -45f); // borde SUR

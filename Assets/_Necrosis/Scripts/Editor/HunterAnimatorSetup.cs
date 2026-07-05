@@ -55,6 +55,9 @@ public static class HunterAnimatorSetup
         var imp = AssetImporter.GetAtPath(path) as ModelImporter;
         if (imp == null) { Debug.LogWarning($"[NECROSIS] No es modelo importable: {path}"); return; }
 
+        // Ya Humanoid y sin cambios de loop: no reimportar (evita rehornear el zombi de 105MB)
+        if (imp.animationType == ModelImporterAnimationType.Human && !loop.HasValue) return;
+
         imp.animationType = ModelImporterAnimationType.Human;
         imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
 
@@ -89,9 +92,10 @@ public static class HunterAnimatorSetup
         var loco = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
         tree.blendType = BlendTreeType.Simple1D;
         tree.blendParameter = "Speed";
+        tree.useAutomaticThresholds = false; // respetar los umbrales en m/s reales (si no, Unity los reparte 0..1)
         tree.AddChild(LoadClip(AnimDir + "/zombie_idle.fbx"), 0f);
         tree.AddChild(LoadClip(AnimDir + "/zombie_walk.fbx"), 1.5f);
-        tree.AddChild(LoadClip(AnimDir + "/zombie_run.fbx"), 4f);
+        tree.AddChild(LoadClip(AnimDir + "/zombie_run.fbx"), 3f); // < chase (4.2) para que correr SÍ aparezca
         sm.defaultState = loco;
 
         // Ataque: desde cualquier estado cuando Attacking; vuelve al soltarlo

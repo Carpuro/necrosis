@@ -53,6 +53,9 @@ public static class PlayerAnimatorSetup
         var imp = AssetImporter.GetAtPath(path) as ModelImporter;
         if (imp == null) { Debug.LogWarning($"[NECROSIS] No es modelo importable: {path}"); return; }
 
+        // Ya Humanoid y sin cambios de loop: no reimportar.
+        if (imp.animationType == ModelImporterAnimationType.Human && !loop.HasValue) return;
+
         imp.animationType = ModelImporterAnimationType.Human;
         imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
 
@@ -86,15 +89,17 @@ public static class PlayerAnimatorSetup
         var loco = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
         tree.blendType = BlendTreeType.Simple1D;
         tree.blendParameter = "Speed";
+        tree.useAutomaticThresholds = false; // respetar umbrales en m/s reales
         tree.AddChild(LoadClip(AnimDir + "/idle.fbx"), 0f);
         tree.AddChild(LoadClip(AnimDir + "/walk.fbx"), 3.5f);  // walkSpeed
-        tree.AddChild(LoadClip(AnimDir + "/run.fbx"), 6.5f);   // runSpeed
+        tree.AddChild(LoadClip(AnimDir + "/run.fbx"), 6f);     // < runSpeed (6.5) para alcanzar el nodo con amortiguado
         sm.defaultState = loco;
 
         // Agachado: blend por Speed (crouch_idle quieto -> crouch_walking en movimiento)
         var crouch = controller.CreateBlendTreeInController("Crouch", out BlendTree crouchTree, 0);
         crouchTree.blendType = BlendTreeType.Simple1D;
         crouchTree.blendParameter = "Speed";
+        crouchTree.useAutomaticThresholds = false;
         crouchTree.AddChild(LoadClip(AnimDir + "/crouch_idle.fbx"), 0f);
         crouchTree.AddChild(LoadClip(AnimDir + "/crouch_walking.fbx"), 1.5f); // crouchSpeed
 
