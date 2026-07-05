@@ -439,14 +439,17 @@ public class PlayerController : MonoBehaviour
         walkStartTimer = 0f;
         startingWalk = false;
 
+        // Turn side by signed angle vs. the last heading.
+        turn180Dir = Vector3.SignedAngle(lastMoveDir, worldDir, Vector3.up) >= 0f ? 1f : -1f;
+
         turn180From = transform.rotation;
-        turn180To = Quaternion.LookRotation(worldDir, Vector3.up);
+        // Rotate exactly 180° (matches the clip) rather than to the arbitrary input
+        // angle — no foot slide. Steering handles any small remainder afterwards.
+        turn180To = Quaternion.Euler(0f, transform.eulerAngles.y + 180f * turn180Dir, 0f);
 
         // Freeze the speed tier at trigger time so idle/walk/run pick the right clip.
         turn180Tier = currentSpeed < 0.5f ? 0f
                     : (currentSpeed < runSpeed - 1f ? 1f : 2f);
-        // Turn side by signed angle vs. the last heading.
-        turn180Dir = Vector3.SignedAngle(lastMoveDir, worldDir, Vector3.up) >= 0f ? 1f : -1f;
     }
 
     /// <summary>While turning 180: don't advance, keep the speed (so it resumes
@@ -455,14 +458,6 @@ public class PlayerController : MonoBehaviour
     {
         frameMove = Vector3.zero;
         turn180Timer += Time.deltaTime;
-
-        // Keep steering the target toward current input (ARC-style), so facing ends
-        // aligned with movement — no post-turn re-accommodate/desync.
-        if (moving && cameraTransform != null)
-        {
-            Vector3 wd = (camForward * inV + camRight * inH).normalized;
-            if (wd.sqrMagnitude > 0.01f) turn180To = Quaternion.LookRotation(wd, Vector3.up);
-        }
 
         // Rotate in lockstep with the Turn180 clip (not a fixed timer) so the feet
         // don't slide — same fix as the discrete turn. Timer fallback during the
@@ -518,7 +513,12 @@ public class PlayerController : MonoBehaviour
         discreteTurning = true;
         discreteTimer = 0f;
         discreteFrom = transform.rotation;
-        discreteTo = Quaternion.LookRotation(worldDir, Vector3.up);
+        // Rotate by the CLIP'S exact amount (90 or 180), not the arbitrary input
+        // angle — so the body rotation matches the clip's foot steps (no slide).
+        // Post-turn steering smooths any small remainder toward the real input dir.
+        float turnSide = Mathf.Sign(turnSelect);
+        float deg = (Mathf.Abs(turnSelect) > 1.5f ? 180f : 90f) * turnSide;
+        discreteTo = Quaternion.Euler(0f, transform.eulerAngles.y + deg, 0f);
         // Cancel the forward walk-start; the discrete turn takes over.
         startWalkQueued = false; walkStartTimer = 0f; startingWalk = false;
     }
@@ -534,15 +534,8 @@ public class PlayerController : MonoBehaviour
         // Rotate the body in lockstep with the CLIP'S playback progress so the feet
         // don't slide. Fall back to a timer if the animator/state isn't available yet
         // (e.g. during the 0.1s crossfade into the turn state, or no model).
-        // Keep steering the target toward the CURRENT input (ARC-style concatenation):
-        // if you change direction mid-turn, the body ends facing where you're going,
-        // so there's no re-accommodate snap and facing never desyncs from movement.
-        if (moving && cameraTransform != null)
-        {
-            Vector3 wd = (camForward * inV + camRight * inH).normalized;
-            if (wd.sqrMagnitude > 0.01f) discreteTo = Quaternion.LookRotation(wd, Vector3.up);
-        }
-
+        // Committed: rotates to the fixed snapped target (no mid-turn re-aim), so the
+        // body rotation always matches the clip amount and the feet don't slide.
         bool hasProgress = animDriver.TryGetStateProgress("TurnInPlace", out float p);
         float t = hasProgress ? Mathf.Clamp01(p)
                               : Mathf.Clamp01(discreteTimer / discreteDuration);
