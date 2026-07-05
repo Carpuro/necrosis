@@ -68,6 +68,9 @@ public class HunterAI : MonoBehaviour
 
     public State CurrentState { get; private set; } = State.Patrol;
 
+    /// <summary>Se dispara al conectar una mordida (para sonido/efectos). Ver HunterVoice.</summary>
+    public event System.Action OnAttackLanded;
+
     // --- Memoria: dónde y cuándo percibió al jugador por última vez ---
     Vector3 lastKnownPosition;
     float lastPerceivedTime = -999f;
@@ -288,6 +291,7 @@ public class HunterAI : MonoBehaviour
         {
             attackTimer = 0f;
             if (playerHealth != null) playerHealth.TakeDamage(attackDamage);
+            OnAttackLanded?.Invoke();
         }
         if (!perceived && !RemembersPlayer)
             SetState(State.Investigate); // te perdió y la memoria caducó: rebusca
@@ -330,6 +334,7 @@ public class HunterAI : MonoBehaviour
         {
             attackTimer = 0f;
             if (playerHealth != null) playerHealth.TakeDamage(attackDamage * 1.5f); // muerde más fuerte
+            OnAttackLanded?.Invoke();
         }
 
         if (stateTimer >= frenzyDuration)

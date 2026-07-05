@@ -20,6 +20,7 @@ public static class Fase0SceneBuilder
     const string HunterMatPath = "Assets/_Necrosis/Materials/Hunter_Red.mat";
     const string ExtractionMatPath = "Assets/_Necrosis/Materials/Extraction_Green.mat";
     const string StaticClipPath = "Assets/_Necrosis/Audio/static_noise.wav";
+    const string AudioDir = "Assets/_Necrosis/Audio/";
 
     // La ronda es una carrera de extracción de borde a borde (suelo 100x100).
     static readonly Vector3 PlayerSpawn = new Vector3(0f, 1.1f, -45f); // borde SUR
@@ -131,6 +132,12 @@ public static class Fase0SceneBuilder
         var cycle = cycleGo.AddComponent<DayNightCycle>();
         cycle.sunLight = sun;
 
+        // --- Ambiente sonoro global: cama atmosférica + gritos lejanos ---
+        var ambienceGo = new GameObject("Ambience");
+        var ambience = ambienceGo.AddComponent<AmbienceAudio>();
+        ambience.ambientLoop = Clip("terror_ambience.mp3");
+        ambience.distantScreams = new[] { Clip("zombie_distance_scream.wav") };
+
         // --- Jugador (cápsula + todos los componentes) ---
         var player = GameObject.CreatePrimitive(PrimitiveType.Capsule);
         player.name = "Player";
@@ -204,6 +211,17 @@ public static class Fase0SceneBuilder
             hunter.AddComponent<NavMeshAgent>();
             var ai = hunter.AddComponent<HunterAI>();
             ai.obstacleMask = 1 << 0; // capa Default: los muros bloquean su visión
+
+            // Voz 3D del Cazador (gruñidos/chillidos posicionales; localizables por oído)
+            var voice = hunter.AddComponent<HunterVoice>();
+            voice.patrolVoices = new[]
+            {
+                Clip("zombie_moaning.wav"), Clip("zombie_growling.wav"), Clip("zombie_standing_noise.mp3")
+            };
+            voice.huntVoices  = new[] { Clip("zombie_scream.wav"), Clip("zombie_growling.wav") };
+            voice.frenzyVoice = Clip("zombie_scream.wav");
+            voice.attackClip  = Clip("zombie_attack.wav");
+            voice.nearClip    = Clip("zombie_near.wav");
         }
 
         // --- Control de misión: objetivo, distancia restante y resultado ---
@@ -219,4 +237,7 @@ public static class Fase0SceneBuilder
 
         Debug.Log($"[NECROSIS] Escena de fase 0 construida y guardada en {ScenePath}");
     }
+
+    static AudioClip Clip(string file) =>
+        AssetDatabase.LoadAssetAtPath<AudioClip>(AudioDir + file);
 }
