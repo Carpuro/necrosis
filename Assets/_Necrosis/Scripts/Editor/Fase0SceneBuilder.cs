@@ -330,8 +330,11 @@ public static class Fase0SceneBuilder
         if (animator == null) animator = model.AddComponent<Animator>();
         animator.runtimeAnimatorController =
             AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(PlayerAnimatorPath);
-        animator.applyRootMotion = false;
+        // Root motion ON pero gestionado por RootMotionRelay + PlayerController:
+        // locomoción recta por código, GIROS por root motion (sin deslizar pies).
+        animator.applyRootMotion = true;
         movement.animator = animator;
+        movement.rootMotion = model.AddComponent<RootMotionRelay>();
 
         var rend = player.GetComponent<MeshRenderer>();
         if (rend != null) rend.enabled = false;

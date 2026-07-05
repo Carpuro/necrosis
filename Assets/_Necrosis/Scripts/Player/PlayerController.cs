@@ -46,6 +46,8 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Animator del modelo rigged (p. ej. Mixamo). Si es null, sigue la cápsula.\n" +
              "Parámetros esperados en el Animator Controller: float 'Speed', bool 'Crouch'.")]
     public Animator animator;
+    [Tooltip("Relé de root motion del modelo (para girar el cuerpo con la animación).")]
+    public RootMotionRelay rootMotion;
 
     public enum MoveState { Idle, Crouch, Walk, Run, Sprint }
     public MoveState CurrentState { get; private set; } = MoveState.Idle;
@@ -256,14 +258,14 @@ public class PlayerController : MonoBehaviour
                 };
                 if (turning180)
                 {
-                    // Durante el giro 180: NO avanza y NO acelera (velocidad congelada
-                    // en 0 para que no haya deslizamiento ni tirón al terminar).
+                    // Durante el giro 180: NO avanza; el CUERPO LO GIRA LA ANIMACIÓN
+                    // (root motion) → los pies plantan, sin deslizamiento.
                     currentSpeed = 0f;
                     move = Vector3.zero;
+                    if (rootMotion != null)
+                        transform.rotation = rootMotion.DeltaRotation * transform.rotation;
                     turn180Timer += Time.deltaTime;
-                    float t180 = Mathf.Clamp01(turn180Timer / turn180Duration);
-                    transform.rotation = Quaternion.Slerp(turn180From, turn180To, t180);
-                    if (t180 >= 1f) turning180 = false;
+                    if (turn180Timer >= turn180Duration) turning180 = false;
                 }
                 else
                 {
@@ -317,11 +319,12 @@ public class PlayerController : MonoBehaviour
                 if (Mathf.Abs(diff) > turnInPlaceThreshold) turningInPlace = true;
                 if (turningInPlace)
                 {
-                    float step = Mathf.Clamp(diff, -turnInPlaceSpeed * Time.deltaTime,
-                                                    turnInPlaceSpeed * Time.deltaTime);
-                    transform.Rotate(0f, step, 0f);
+                    // El cuerpo lo gira la ANIMACIÓN (root motion); el código solo
+                    // marca la dirección y detecta cuándo ya está alineado.
+                    if (rootMotion != null)
+                        transform.rotation = rootMotion.DeltaRotation * transform.rotation;
                     turnInPlaceDir = Mathf.Sign(diff);
-                    if (Mathf.Abs(diff) < 5f) turningInPlace = false; // ya alineado
+                    if (Mathf.Abs(diff) < 8f) turningInPlace = false; // ya alineado
                 }
             }
         }
