@@ -67,3 +67,8 @@ desktop.ini
 
 # Proyecto accidental de Unity Hub (el proyecto real es la raiz del repo)
 /Necrosis/
+
+# Modelo de zombi de prueba: 105MB, supera el limite de 100MB de GitHub.
+# Local-only (decision de Carlos); Unity lo usa en disco pero NO se versiona.
+/Assets/_Necrosis/Characters/Hunter/model_zombie_tpose.fbx
+/Assets/_Necrosis/Characters/Hunter/model_zombie_tpose.fbx.meta
