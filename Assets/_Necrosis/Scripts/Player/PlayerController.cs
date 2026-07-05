@@ -526,10 +526,12 @@ public class PlayerController : MonoBehaviour
         if (t < 0.98f || discreteTimer < 0.1f) return;
         discreteTurning = false;
 
-        // The turn itself never ramps. Only if you're STILL holding the direction
-        // when it finishes does the walk-start ramp fire and you move off; a single
-        // tap just leaves you turned, standing.
-        if (moving)
+        // The turn itself never ramps. If you're STILL holding the direction when it
+        // finishes, movement resumes — but only the 90 turns play the walk-start
+        // ramp; the 180 continues straight into movement (no step-off), like the
+        // running 180. A single tap just leaves you turned, standing.
+        bool is180 = Mathf.Abs(turnSelect) > 1.5f;
+        if (moving && !is180)
         {
             walkStartTimer = walkStartDuration;
             startWalkQueued = true;

@@ -276,6 +276,7 @@ public static class PlayerAnimatorSetup
         // -2 180-left · -1 90-left · 0 idle · +1 90-right · +2 180-right.
         // Entered from locomotion while TurningInPlace; exits when it clears.
         var turnIP = controller.CreateBlendTreeInController("TurnInPlace", out BlendTree tip, 0);
+        turnIP.speed = 2f; // discrete turn twice as fast (rotation follows normalizedTime, stays synced)
         tip.blendType = BlendTreeType.Simple1D;
         tip.blendParameter = "TurnInPlace";
         tip.useAutomaticThresholds = false;
