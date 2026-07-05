@@ -59,14 +59,25 @@ public static class PlayerAnimatorSetup
         "animation_ybot_movement_run_turn_left.fbx",
     };
 
+    const string YBotModel = PlayerDir + "/Models/model_y_bot_tpose.fbx";
+
     [MenuItem("Necrosis/Setup animación del Jugador")]
     public static void Run()
     {
-        foreach (var m in Models) SetHumanoid(m, null);
-        foreach (var (file, loop) in Anims) SetHumanoid(file, loop);
+        // 1) Modelos: avatar Humanoid creado desde sí mismos.
+        foreach (var m in Models) SetHumanoid(m, null, null);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        // 2) Todos los clips COPIAN el avatar de y_bot (mismo esqueleto). Evita que
+        //    cada clip genere su propio avatar y desmapee extremidades (pie izq).
+        var ybotAvatar = LoadAvatar(YBotModel);
+        if (ybotAvatar == null) Debug.LogWarning("[NECROSIS] No se encontró el avatar de y_bot.");
+
+        foreach (var (file, loop) in Anims) SetHumanoid(file, loop, ybotAvatar);
         foreach (var s in Stances)
             foreach (var d in AimDirs)
-                SetHumanoid($"{AnimDir}/aim/{s}/animation_ybot_aim_{s}_{d}.fbx", true);
+                SetHumanoid($"{AnimDir}/aim/{s}/animation_ybot_aim_{s}_{d}.fbx", true, ybotAvatar);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
@@ -74,16 +85,32 @@ public static class PlayerAnimatorSetup
         Debug.Log("[NECROSIS] Setup de animación del Jugador completado.");
     }
 
-    static void SetHumanoid(string path, bool? loop)
+    static Avatar LoadAvatar(string modelPath)
+    {
+        foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelPath))
+            if (a is Avatar av) return av;
+        return null;
+    }
+
+    static void SetHumanoid(string path, bool? loop, Avatar sourceAvatar)
     {
         var imp = AssetImporter.GetAtPath(path) as ModelImporter;
         if (imp == null) { Debug.LogWarning($"[NECROSIS] No es modelo importable: {path}"); return; }
 
-        // Ya Humanoid y sin cambios de loop: no reimportar.
-        if (imp.animationType == ModelImporterAnimationType.Human && !loop.HasValue) return;
-
         imp.animationType = ModelImporterAnimationType.Human;
-        imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+        if (sourceAvatar != null)
+        {
+            // Clip: copiar el avatar de y_bot (retarget consistente, arregla pies).
+            imp.avatarSetup = ModelImporterAvatarSetup.CopyFromOther;
+            imp.sourceAvatar = sourceAvatar;
+        }
+        else
+        {
+            // Modelo: su propio avatar. Si ya es Humanoid, no re-hornear.
+            if (imp.animationType == ModelImporterAnimationType.Human &&
+                imp.avatarSetup == ModelImporterAvatarSetup.CreateFromThisModel) return;
+            imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+        }
 
         bool mirror = System.Array.Exists(MirrorClips, m => path.EndsWith(m));
         if (loop.HasValue || mirror)
