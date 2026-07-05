@@ -1,116 +1,149 @@
 using UnityEngine;
 
 /// <summary>
-/// NECROSIS://PROTOCOLO — Controlador de jugador en tercera persona.
-/// Movimiento relativo a cámara: caminar, correr, agacharse.
-/// Requiere: CharacterController en el mismo GameObject, tag "Player".
-/// La cámara la maneja ShoulderCamera.cs (aparte).
+/// NECROSIS://PROTOCOLO — Third-person player controller.
+///
+/// Camera-relative locomotion with a rich move set:
+///   walk / run / sprint · crouch · aim-strafe · dodge roll ·
+///   ARC-style walk start · in-place turn · 180 turn.
+///
+/// Requires a CharacterController on the same GameObject and the "Player" tag.
+/// The camera is handled separately by ShoulderCamera.cs. If an Animator is
+/// assigned it is driven every frame; otherwise the bare capsule still moves.
+///
+/// Update() reads input once, then delegates to one method per feature so each
+/// concern stays isolated and readable.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
-    [Header("Velocidades (m/s)")]
+    // ───────────────────────────────────────────────────────────────────────
+    #region Inspector — tunables
+    // ───────────────────────────────────────────────────────────────────────
+
+    [Header("Speeds (m/s)")]
     public float crouchSpeed = 1.5f;
-    public float walkSpeed = 2.5f; // ajustado al stride del clip (menos deslizamiento)
+    [Tooltip("Matched to the walk clip stride to avoid foot sliding.")]
+    public float walkSpeed = 2.5f;
     public float runSpeed = 6.5f;
     public float sprintSpeed = 8f;
-    [Tooltip("Velocidad al apuntar/strafear (clic derecho), estilo State of Decay.")]
+    [Tooltip("Speed while aiming/strafing (right mouse), State-of-Decay style.")]
     public float aimSpeed = 2.8f;
 
-    [Header("Física")]
+    [Header("Physics")]
     public float gravity = -20f;
     public float rotationSmoothness = 12f;
 
-    [Header("Aceleración (rampa idle->caminar->correr)")]
-    [Tooltip("Cuánto sube la velocidad por segundo: pasa por caminar antes de correr.")]
+    [Header("Acceleration (idle→walk→run ramp)")]
+    [Tooltip("Speed gained per second; makes the blend pass through walk before run.")]
     public float acceleration = 10f;
     public float deceleration = 16f;
-    float currentSpeed; // velocidad actual suavizada (para la rampa natural)
 
-    [Header("Giro 180 (invertir el sentido)")]
-    [Tooltip("Ángulo (grados) contra tu rumbo para disparar el giro 180.")]
+    [Header("Walk start (ARC style)")]
+    [Tooltip("Seconds the player stays planted (no advance) during the start step.")]
+    public float walkStartDuration = 0.18f;
+    [Tooltip("Seconds standing still before the start step is allowed. Prevents it " +
+             "from firing right after moving (reversals, turns).")]
+    public float walkStartIdleDelay = 0.4f;
+
+    [Header("In-place turn (standing)")]
+    [Tooltip("Angle vs. camera that triggers the standing turn.")]
+    public float turnInPlaceThreshold = 50f;
+    [Tooltip("Angular speed (deg/s) when turning in place.")]
+    public float turnInPlaceSpeed = 240f;
+
+    [Header("180 turn (reverse direction)")]
+    [Tooltip("Angle vs. last heading that triggers the 180.")]
     public float turn180Threshold = 135f;
     public float turn180Duration = 0.45f;
+
+    [Header("Turn blend")]
+    [Tooltip("Angular speed (deg/s) mapped to a full turn blend. Lower = turns show sooner.")]
+    public float turnRateForFullBlend = 90f;
+
+    [Header("Dodge roll")]
+    public float rollSpeed = 7f;
+    public float rollDuration = 0.7f;
+
+    [Header("References")]
+    public Transform cameraTransform;     // Main Camera
+    [Tooltip("Rigged model Animator (e.g. Mixamo). If null, only the capsule moves.")]
+    public Animator animator;
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Public state (read by Animator, footsteps, HUD, other systems)
+    // ───────────────────────────────────────────────────────────────────────
+
+    public enum MoveState { Idle, Crouch, Walk, Run, Sprint }
+    public enum Stance { Fists, Melee, Gun }
+
+    public MoveState CurrentState { get; private set; } = MoveState.Idle;
+    public Stance CurrentStance { get; private set; } = Stance.Fists;
+
+    /// <summary>Real horizontal speed (m/s). Read by Animator and footsteps.</summary>
+    public float PlanarSpeed { get; private set; }
+    /// <summary>Normalized turn: -1 (left) .. +1 (right). Read by Animator.</summary>
+    public float TurnSignal { get; private set; }
+    /// <summary>True while aiming/strafing (right mouse held).</summary>
+    public bool Aiming { get; private set; }
+    /// <summary>True while free-strafing without aiming (currently unused).</summary>
+    public bool StrafeLock { get; private set; }
+    /// <summary>Strafe axes sent to the Animator (also exposed for debug).</summary>
+    public float AimX { get; private set; }
+    public float AimY { get; private set; }
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Private state
+    // ───────────────────────────────────────────────────────────────────────
+
+    CharacterController controller;
+    float normalHeight, normalCenterY;
+    float verticalVelocity;
+
+    // Toggles: C = walk/run, Ctrl = crouch (Shift = sprint is held, not toggled).
+    bool runToggled, crouchToggled;
+
+    // Smoothed speed used for the natural accel ramp.
+    float currentSpeed;
+
+    // Walk-start (ARC) runtime.
+    MoveState prevState = MoveState.Idle;
+    float walkStartTimer, idleTime;
+    bool startWalkQueued;
+
+    // 180 turn runtime.
     bool turning180;
     float turn180Timer;
     Quaternion turn180From, turn180To;
     bool turn180Queued;
-    float turn180Tier;  // 0 idle, 1 caminar, 2 correr (congelado al disparar)
-    float turn180Dir;   // -1 izq, +1 der (según el lado del giro / cámara)
-    Vector3 lastMoveDir = Vector3.forward; // última dirección de movimiento (persiste en pausas)
+    float turn180Tier;                       // 0 idle · 1 walk · 2 run (frozen on trigger)
+    float turn180Dir;                        // -1 left · +1 right (turn side)
+    Vector3 lastMoveDir = Vector3.forward;   // last heading (persists through brief pauses)
 
-    [Header("Referencias")]
-    public Transform cameraTransform; // asignar la Main Camera
+    // In-place turn runtime.
+    bool turningInPlace;
+    float prevYaw;
 
-    [Header("Animación (opcional)")]
-    [Tooltip("Animator del modelo rigged (p. ej. Mixamo). Si es null, sigue la cápsula.\n" +
-             "Parámetros esperados en el Animator Controller: float 'Speed', bool 'Crouch'.")]
-    public Animator animator;
-
-    public enum MoveState { Idle, Crouch, Walk, Run, Sprint }
-    public MoveState CurrentState { get; private set; } = MoveState.Idle;
-
-    // C = caminar/correr (toggle), Ctrl = agacharse (toggle), Shift = esprintar (mantener)
-    bool runToggled;
-    bool crouchToggled;
-    MoveState prevState = MoveState.Idle; // para detectar el arranque idle->caminar
-
-    [Header("Arranque al caminar (estilo ARC)")]
-    [Tooltip("Tiempo SIN avanzar al arrancar: hasta que el primer pie apoya (clip a 2x). " +
-             "Luego empieza a caminar. Ajustar para que coincida con el apoyo del pie.")]
-    public float walkStartDuration = 0.18f;
-    [Tooltip("Segundos parado antes de permitir el ramp de arranque. Evita que se " +
-             "dispare justo tras caminar/correr (inversiones, giros).")]
-    public float walkStartIdleDelay = 0.4f;
-    float walkStartTimer;
-    float idleTime; // segundos que llevas parado (0 mientras te mueves)
-    bool startWalkQueued;
-
-    /// <summary>Velocidad horizontal real (m/s). La leen Animator y pasos.</summary>
-    public float PlanarSpeed { get; private set; }
-
-    /// <summary>Giro normalizado: -1 (izquierda) .. +1 (derecha). Lo lee el Animator.</summary>
-    public float TurnSignal { get; private set; }
-
-    /// <summary>True mientras se apunta/strafea (clic derecho mantenido).</summary>
-    public bool Aiming { get; private set; }
-
-    /// <summary>True mientras se strafea libre (sin apuntar).</summary>
-    public bool StrafeLock { get; private set; }
-
-    /// <summary>Ejes de strafe que se mandan al Animator (debug).</summary>
-    public float AimX { get; private set; }
-    public float AimY { get; private set; }
-
-    [Header("Esquiva (rodar)")]
-    public float rollSpeed = 7f;
-    public float rollDuration = 0.7f;
+    // Dodge roll runtime.
     bool rolling;
     float rollTimer;
     Vector3 rollDir;
 
-    // Postura de combate seleccionada (1 puños, 2 melé, 3 arma). Decide qué set
-    // de animaciones de strafe usa el modo apuntar.
-    public enum Stance { Fists, Melee, Gun }
-    public Stance CurrentStance { get; private set; } = Stance.Fists;
+    // Per-frame scratch (recomputed each Update).
+    float inH, inV;
+    bool sprintHeld, moving, faceCamera, crouched, startingWalk;
+    Vector3 camForward, camRight, frameMove;
+    float animAimX, animAimY, animTurnInPlaceDir;
 
-    [Header("Giro")]
-    [Tooltip("Velocidad angular (grados/s) que corresponde al giro completo de la animación. " +
-             "Más bajo = los giros se notan antes.")]
-    public float turnRateForFullBlend = 90f;
-    float prevYaw;
+    #endregion
 
-    [Header("Giro en el sitio (parado)")]
-    [Tooltip("Grados de diferencia con la cámara para disparar el giro en el sitio.")]
-    public float turnInPlaceThreshold = 50f;
-    [Tooltip("Velocidad de rotación (grados/s) al girar en el sitio.")]
-    public float turnInPlaceSpeed = 240f;
-    bool turningInPlace;
-
-    CharacterController controller;
-    float verticalVelocity;
-    float normalHeight;
-    float normalCenterY;
+    // ───────────────────────────────────────────────────────────────────────
+    #region Unity lifecycle
+    // ───────────────────────────────────────────────────────────────────────
 
     void Awake()
     {
@@ -124,258 +157,395 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        // --- Input (toggles) ---
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        if (Input.GetKeyDown(KeyCode.C)) runToggled = !runToggled;             // caminar <-> correr (toggle)
-        if (Input.GetKeyDown(KeyCode.LeftControl)) crouchToggled = !crouchToggled; // agacharse (toggle)
-        bool sprintHeld = Input.GetKey(KeyCode.LeftShift);                     // esprint (mantener)
-        if (Input.GetKeyDown(KeyCode.Alpha1)) CurrentStance = Stance.Fists;   // 1 puños
-        if (Input.GetKeyDown(KeyCode.Alpha2)) CurrentStance = Stance.Melee;   // 2 melé
-        if (Input.GetKeyDown(KeyCode.Alpha3)) CurrentStance = Stance.Gun;     // 3 arma
+        ReadInput();
 
-        Vector3 inputDir = new Vector3(h, 0f, v).normalized;
-        bool moving = inputDir.sqrMagnitude > 0.01f;
-
-        // --- Esquiva (rodar): Espacio. Rueda en la dirección de input (o de frente).
-        //     Es un override: durante la rodada el movimiento y la anim los manda esto. ---
+        // Dodge roll fully overrides movement/animation while active.
         if (rolling) { UpdateRoll(); return; }
-        if (Input.GetKeyDown(KeyCode.Space) && controller.isGrounded)
+        if (TryStartRoll()) return;
+
+        UpdateStanceAndAiming();
+        UpdateMoveState();
+        UpdateWalkStart();
+        ApplyCrouchHeight();
+        HandleMovement();
+        ApplyGravityAndMove();
+        UpdatePlanarSpeed();
+        UpdateTurnSignal();
+        UpdateTurnInPlace();
+        UpdateAnimator();
+        EndFrame();
+    }
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Input
+    // ───────────────────────────────────────────────────────────────────────
+
+    void ReadInput()
+    {
+        inH = Input.GetAxisRaw("Horizontal");
+        inV = Input.GetAxisRaw("Vertical");
+        moving = new Vector3(inH, 0f, inV).sqrMagnitude > 0.01f;
+
+        if (Input.GetKeyDown(KeyCode.C)) runToggled = !runToggled;              // walk ↔ run
+        if (Input.GetKeyDown(KeyCode.LeftControl)) crouchToggled = !crouchToggled; // crouch
+        sprintHeld = Input.GetKey(KeyCode.LeftShift);                            // sprint (held)
+
+        if (Input.GetKeyDown(KeyCode.Alpha1)) CurrentStance = Stance.Fists;
+        if (Input.GetKeyDown(KeyCode.Alpha2)) CurrentStance = Stance.Melee;
+        if (Input.GetKeyDown(KeyCode.Alpha3)) CurrentStance = Stance.Gun;
+
+        // Camera basis on the ground plane, reused by every movement path.
+        if (cameraTransform != null)
         {
-            rolling = true; rollTimer = 0f;
-            Vector3 wish = Vector3.zero;
-            if (cameraTransform != null)
-            {
-                Vector3 cF = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up).normalized;
-                Vector3 cR = Vector3.ProjectOnPlane(cameraTransform.right, Vector3.up).normalized;
-                wish = (cF * v + cR * h).normalized;
-            }
-            rollDir = wish.sqrMagnitude > 0.01f
-                ? wish
-                : Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
-            transform.rotation = Quaternion.LookRotation(rollDir, Vector3.up);
-            if (animator != null) animator.SetTrigger("Roll");
-            UpdateRoll();
-            return;
+            camForward = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up).normalized;
+            camRight = Vector3.ProjectOnPlane(cameraTransform.right, Vector3.up).normalized;
         }
+    }
 
-        // Strafe SÓLO al apuntar (clic derecho, estilo State of Decay). Funciona con
-        // cualquier postura (puños/melé/arma). El movimiento normal gira a mirar
-        // hacia donde te mueves (no strafe), en cualquier postura.
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Dodge roll
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// <summary>Starts a roll on Space (grounded). Returns true if a roll began.</summary>
+    bool TryStartRoll()
+    {
+        if (!Input.GetKeyDown(KeyCode.Space) || !controller.isGrounded) return false;
+
+        rolling = true;
+        rollTimer = 0f;
+
+        // Roll toward input direction, or straight ahead if idle.
+        Vector3 wish = cameraTransform != null
+            ? (camForward * inV + camRight * inH).normalized
+            : Vector3.zero;
+        rollDir = wish.sqrMagnitude > 0.01f
+            ? wish
+            : Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+
+        transform.rotation = Quaternion.LookRotation(rollDir, Vector3.up);
+        if (animator != null) animator.SetTrigger("Roll");
+        UpdateRoll();
+        return true;
+    }
+
+    /// <summary>Drives the player at rollSpeed along rollDir for rollDuration.</summary>
+    void UpdateRoll()
+    {
+        rollTimer += Time.deltaTime;
+
+        frameMove = rollDir * rollSpeed;
+        if (controller.isGrounded && verticalVelocity < 0f) verticalVelocity = -2f;
+        verticalVelocity += gravity * Time.deltaTime;
+        frameMove.y = verticalVelocity;
+        controller.Move(frameMove * Time.deltaTime);
+
+        PlanarSpeed = rollSpeed;
+        if (rollTimer >= rollDuration) rolling = false;
+    }
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Stance & movement state
+    // ───────────────────────────────────────────────────────────────────────
+
+    void UpdateStanceAndAiming()
+    {
+        // Strafe only while aiming (right mouse), works in any stance. Normal
+        // movement turns to face the move direction instead of strafing.
         Aiming = Input.GetMouseButton(1) && cameraTransform != null;
-        StrafeLock = false; // sin auto-strafe: caminar normal no strafea
-        bool faceCamera = Aiming;
-        bool crouched = crouchToggled && !Aiming; // al apuntar se está de pie
+        StrafeLock = false;                       // no auto-strafe
+        faceCamera = Aiming;
+        crouched = crouchToggled && !Aiming;      // aiming forces standing
+    }
 
-        // --- Estado de movimiento (prioridad: apuntar/strafe > agachado > esprint > correr > caminar) ---
+    void UpdateMoveState()
+    {
+        // Priority: aim > crouch > sprint > run > walk.
         if (faceCamera) CurrentState = moving ? MoveState.Walk : MoveState.Idle;
         else if (crouched) CurrentState = MoveState.Crouch;
         else if (!moving) CurrentState = MoveState.Idle;
         else if (sprintHeld) CurrentState = MoveState.Sprint;
         else if (runToggled) CurrentState = MoveState.Run;
         else CurrentState = MoveState.Walk;
+    }
 
-        // --- Arranque (estilo ARC): al pasar de parado a moverse de frente
-        //     (caminar/correr/esprint), planta el paso de arranque y NO avanza
-        //     mientras dura; luego la velocidad sube en rampa idle->caminar->correr. ---
-        bool groundMove = CurrentState == MoveState.Walk || CurrentState == MoveState.Run ||
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Walk start (ARC style)
+    // ───────────────────────────────────────────────────────────────────────
+
+    void UpdateWalkStart()
+    {
+        bool groundMove = CurrentState == MoveState.Walk ||
+                          CurrentState == MoveState.Run ||
                           CurrentState == MoveState.Sprint;
-        // El ramp SOLO si venías parado un rato (idleTime del frame previo >= delay).
-        // Así una inversión/giro justo tras moverte NO lo dispara (tu idea, la simple).
+
+        // Only fire when we've been genuinely stopped for a moment, so a reversal
+        // or turn right after moving does not count as a fresh start.
         if (prevState == MoveState.Idle && groundMove && !faceCamera && !crouched
             && !turning180 && idleTime >= walkStartIdleDelay)
         {
             walkStartTimer = walkStartDuration;
-            startWalkQueued = true; // dispara el trigger del Animator abajo
+            startWalkQueued = true;
         }
-        // Actualiza el contador DESPUÉS de comprobar: 0 al moverte, sube al estar quieto.
+
+        // Update the idle timer AFTER the check above.
         if (moving) idleTime = 0f; else idleTime += Time.deltaTime;
 
-        bool startingWalk = walkStartTimer > 0f;
+        startingWalk = walkStartTimer > 0f;
         if (startingWalk) walkStartTimer -= Time.deltaTime;
-        // Cancelar si dejas de moverte o pasas a apuntar/agacharte
         if (!moving || faceCamera || crouched) { walkStartTimer = 0f; startingWalk = false; }
+    }
 
-        // Altura del collider al agacharse.
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Crouch collider
+    // ───────────────────────────────────────────────────────────────────────
+
+    void ApplyCrouchHeight()
+    {
+        // Lower the capsule when crouched; drop the center by half the height loss
+        // so the feet stay on the ground instead of the capsule floating.
         float targetHeight = crouched ? normalHeight * 0.55f : normalHeight;
         controller.height = Mathf.Lerp(controller.height, targetHeight, 10f * Time.deltaTime);
         Vector3 center = controller.center;
         center.y = normalCenterY - (normalHeight - controller.height) * 0.5f;
         controller.center = center;
+    }
 
-        // --- Movimiento relativo a cámara ---
-        Vector3 move = Vector3.zero;
-        float aimX = 0f, aimY = 0f; // strafe (X) y avance/retroceso (Y) al apuntar
-        if (cameraTransform != null)
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Movement
+    // ───────────────────────────────────────────────────────────────────────
+
+    void HandleMovement()
+    {
+        frameMove = Vector3.zero;
+        animAimX = animAimY = 0f;
+        if (cameraTransform == null) return;
+
+        if (faceCamera) AimMovement();
+        else if (moving) GroundMovement();
+        else DecelerateWhileIdle();
+
+        // During the start step, plant in place (no advance, no shuffle).
+        if (startingWalk) { frameMove.x = 0f; frameMove.z = 0f; }
+    }
+
+    /// <summary>Aim/strafe: body faces the camera, WASD strafes around it.</summary>
+    void AimMovement()
+    {
+        Quaternion look = Quaternion.LookRotation(camForward, Vector3.up);
+        transform.rotation = Quaternion.Slerp(transform.rotation, look,
+            rotationSmoothness * Time.deltaTime);
+
+        if (!moving) return;
+
+        float speed = aimSpeed;
+        Vector3 wish = (camForward * inV + camRight * inH).normalized;
+        frameMove = wish * speed;
+
+        // Strafe axes RELATIVE TO THE BODY so the animation matches the movement
+        // even while the body is still rotating toward the camera.
+        Vector3 local = transform.InverseTransformDirection(wish);
+        animAimX = local.x;
+        animAimY = local.z;
+    }
+
+    /// <summary>Free locomotion: accelerate toward the move dir; handle 180 turns.</summary>
+    void GroundMovement()
+    {
+        Vector3 worldDir = (camForward * inV + camRight * inH).normalized;
+
+        TryTrigger180(worldDir);
+        lastMoveDir = worldDir;
+
+        // Target speed by state; zero during the start step (planted).
+        float targetSpeed = startingWalk ? 0f : CurrentState switch
         {
-            Vector3 camForward = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up).normalized;
-            Vector3 camRight = Vector3.ProjectOnPlane(cameraTransform.right, Vector3.up).normalized;
+            MoveState.Crouch => crouchSpeed,
+            MoveState.Sprint => sprintSpeed,
+            MoveState.Run => runSpeed,
+            _ => walkSpeed
+        };
 
-            if (faceCamera)
-            {
-                // Apuntar o strafe libre: el cuerpo mira SIEMPRE hacia la cámara.
-                Quaternion look = Quaternion.LookRotation(camForward, Vector3.up);
-                transform.rotation = Quaternion.Slerp(transform.rotation, look,
-                    rotationSmoothness * Time.deltaTime);
-                // Apuntar usa aimSpeed (más lento); strafe libre desarmado usa walk.
-                float faceSpeed = Aiming ? aimSpeed : walkSpeed;
-                if (moving)
-                {
-                    Vector3 wish = (camForward * v + camRight * h).normalized;
-                    move = wish * faceSpeed;
-                    // Ejes de strafe RELATIVOS AL CUERPO (no input crudo): así la
-                    // animación coincide con el movimiento aunque el cuerpo gire.
-                    Vector3 local = transform.InverseTransformDirection(wish);
-                    aimX = local.x; aimY = local.z;
-                }
-            }
-            else if (moving)
-            {
-                Vector3 worldDir = (camForward * v + camRight * h).normalized;
+        if (turning180)
+        {
+            UpdateTurn180();
+        }
+        else
+        {
+            float rate = targetSpeed > currentSpeed ? acceleration : deceleration;
+            currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, rate * Time.deltaTime);
+            frameMove = worldDir * currentSpeed;
 
-                // Giro 180: compara contra la ÚLTIMA dirección de movimiento (que
-                // persiste aunque hagas una pausa breve o el cuerpo gire hacia la
-                // cámara), no contra el facing actual. Así, si tras andar/correr
-                // pulsas la opuesta, dispara el giro aunque haya pasado un momento.
-                if (!turning180 &&
-                    Vector3.Angle(lastMoveDir, worldDir) > turn180Threshold)
-                {
-                    turning180 = true; turn180Timer = 0f; turn180Queued = true;
-                    // El 180 tiene prioridad sobre el arranque: cancela el walk-start.
-                    startWalkQueued = false; walkStartTimer = 0f; startingWalk = false;
-                    turn180From = transform.rotation;
-                    turn180To = Quaternion.LookRotation(worldDir, Vector3.up);
-                    // Nivel por velocidad AL DISPARAR (congelado): idle/caminar/correr.
-                    turn180Tier = currentSpeed < 0.5f ? 0f
-                                : (currentSpeed < runSpeed - 1f ? 1f : 2f);
-                    // Lado del giro según la cámara/rumbo (hacia dónde inclinas el input).
-                    turn180Dir = Vector3.SignedAngle(lastMoveDir, worldDir, Vector3.up) >= 0f ? 1f : -1f;
-                }
-                lastMoveDir = worldDir; // recordar el rumbo para el próximo giro
+            Quaternion targetRot = Quaternion.LookRotation(worldDir, Vector3.up);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot,
+                rotationSmoothness * Time.deltaTime);
+        }
+    }
 
-                // Velocidad objetivo por estado; durante el arranque es 0 (no avanza).
-                float targetSpeed = startingWalk ? 0f : CurrentState switch
-                {
-                    MoveState.Crouch => crouchSpeed,
-                    MoveState.Sprint => sprintSpeed,
-                    MoveState.Run => runSpeed,
-                    _ => walkSpeed
-                };
-                if (turning180)
-                {
-                    // Durante el giro 180: NO avanza (move=0) pero CONSERVA la
-                    // velocidad. Si la pusiéramos a 0, al terminar aceleraría de 0
-                    // pasando por caminar -> parecería un ramp. Al conservarla,
-                    // reanuda directo a correr tras el giro.
-                    move = Vector3.zero;
-                    turn180Timer += Time.deltaTime;
-                    float t180 = Mathf.Clamp01(turn180Timer / turn180Duration);
-                    transform.rotation = Quaternion.Slerp(turn180From, turn180To, t180);
-                    if (t180 >= 1f) turning180 = false;
-                }
-                else
-                {
-                    float rate = targetSpeed > currentSpeed ? acceleration : deceleration;
-                    currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, rate * Time.deltaTime);
-                    move = worldDir * currentSpeed;
-                    // Rotar el cuerpo hacia la dirección de movimiento
-                    Quaternion targetRot = Quaternion.LookRotation(worldDir, Vector3.up);
-                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRot,
-                        rotationSmoothness * Time.deltaTime);
-                }
-            }
-            else
-            {
-                // Parado: la velocidad DECAE (no se resetea de golpe). Así un frame
-                // suelto al invertir no borra la memoria de "iba en movimiento",
-                // y el ramp de arranque no se dispara por error.
-                currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, deceleration * Time.deltaTime);
-            }
+    /// <summary>Idle: bleed speed off gradually so a one-frame input gap doesn't
+    /// reset the "was moving" memory (which would misfire the start ramp).</summary>
+    void DecelerateWhileIdle()
+    {
+        currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, deceleration * Time.deltaTime);
+    }
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region 180 turn
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// <summary>Fires a 180 when the requested dir opposes the last heading.
+    /// Compares against lastMoveDir (persists through pauses), not current facing.</summary>
+    void TryTrigger180(Vector3 worldDir)
+    {
+        if (turning180) return;
+        if (Vector3.Angle(lastMoveDir, worldDir) <= turn180Threshold) return;
+
+        turning180 = true;
+        turn180Timer = 0f;
+        turn180Queued = true;
+
+        // 180 takes priority over the start step.
+        startWalkQueued = false;
+        walkStartTimer = 0f;
+        startingWalk = false;
+
+        turn180From = transform.rotation;
+        turn180To = Quaternion.LookRotation(worldDir, Vector3.up);
+
+        // Freeze the speed tier at trigger time so idle/walk/run pick the right clip.
+        turn180Tier = currentSpeed < 0.5f ? 0f
+                    : (currentSpeed < runSpeed - 1f ? 1f : 2f);
+        // Turn side by signed angle vs. the last heading.
+        turn180Dir = Vector3.SignedAngle(lastMoveDir, worldDir, Vector3.up) >= 0f ? 1f : -1f;
+    }
+
+    /// <summary>While turning 180: don't advance, keep the speed (so it resumes
+    /// straight into run without a phantom ramp), rotate over the clip.</summary>
+    void UpdateTurn180()
+    {
+        frameMove = Vector3.zero;
+        turn180Timer += Time.deltaTime;
+        float t = Mathf.Clamp01(turn180Timer / turn180Duration);
+        transform.rotation = Quaternion.Slerp(turn180From, turn180To, t);
+        if (t >= 1f) turning180 = false;
+    }
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region In-place turn (standing)
+    // ───────────────────────────────────────────────────────────────────────
+
+    void UpdateTurnInPlace()
+    {
+        animTurnInPlaceDir = 0f;
+
+        if (Aiming || CurrentState != MoveState.Idle || cameraTransform == null)
+        {
+            turningInPlace = false;
+            return;
         }
 
-        // Arranque al caminar: no avanzar mientras se planta el paso (sin shuffle).
-        if (startingWalk) { move.x = 0f; move.z = 0f; }
+        Vector3 camF = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up);
+        if (camF.sqrMagnitude <= 0.001f) return;
 
-        // --- Gravedad ---
+        float camYaw = Quaternion.LookRotation(camF).eulerAngles.y;
+        float diff = Mathf.DeltaAngle(transform.eulerAngles.y, camYaw);
+
+        if (Mathf.Abs(diff) > turnInPlaceThreshold) turningInPlace = true;
+        if (!turningInPlace) return;
+
+        float step = Mathf.Clamp(diff, -turnInPlaceSpeed * Time.deltaTime,
+                                        turnInPlaceSpeed * Time.deltaTime);
+        transform.Rotate(0f, step, 0f);
+        animTurnInPlaceDir = Mathf.Sign(diff);
+        if (Mathf.Abs(diff) < 5f) turningInPlace = false; // aligned
+    }
+
+    #endregion
+
+    // ───────────────────────────────────────────────────────────────────────
+    #region Gravity, apply, derived signals
+    // ───────────────────────────────────────────────────────────────────────
+
+    void ApplyGravityAndMove()
+    {
         if (controller.isGrounded && verticalVelocity < 0f) verticalVelocity = -2f;
         verticalVelocity += gravity * Time.deltaTime;
-        move.y = verticalVelocity;
+        frameMove.y = verticalVelocity;
+        controller.Move(frameMove * Time.deltaTime);
+    }
 
-        controller.Move(move * Time.deltaTime);
+    void UpdatePlanarSpeed()
+    {
+        // While turning 180 we don't advance, but report currentSpeed so the blend
+        // resumes at the previous speed instead of ramping up from zero.
+        PlanarSpeed = turning180
+            ? currentSpeed
+            : new Vector3(frameMove.x, 0f, frameMove.z).magnitude;
+    }
 
-        // Velocidad horizontal real (para Animator y pasos)
-        // Durante el 180 no avanzamos, pero mandamos currentSpeed para que al salir
-        // el blend reanude directo a la velocidad previa (sin pasar por caminar).
-        PlanarSpeed = turning180 ? currentSpeed : new Vector3(move.x, 0f, move.z).magnitude;
-
-        // Señal de giro: velocidad angular en yaw, normalizada a -1 (izq) .. +1 (der)
+    void UpdateTurnSignal()
+    {
         float yaw = transform.eulerAngles.y;
         float yawRate = Mathf.DeltaAngle(prevYaw, yaw) / Mathf.Max(Time.deltaTime, 1e-4f);
         prevYaw = yaw;
         TurnSignal = Mathf.Clamp(yawRate / turnRateForFullBlend, -1f, 1f);
+    }
 
-        // --- Giro en el sitio (parado): al mirar lejos de tu eje, gira el cuerpo
-        //     hacia la cámara con animación visible, estilo tercera persona. ---
-        float turnInPlaceDir = 0f;
-        if (!Aiming && CurrentState == MoveState.Idle && cameraTransform != null)
-        {
-            Vector3 camF = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up);
-            if (camF.sqrMagnitude > 0.001f)
-            {
-                float camYaw = Quaternion.LookRotation(camF).eulerAngles.y;
-                float diff = Mathf.DeltaAngle(transform.eulerAngles.y, camYaw);
-                if (Mathf.Abs(diff) > turnInPlaceThreshold) turningInPlace = true;
-                if (turningInPlace)
-                {
-                    float step = Mathf.Clamp(diff, -turnInPlaceSpeed * Time.deltaTime,
-                                                    turnInPlaceSpeed * Time.deltaTime);
-                    transform.Rotate(0f, step, 0f);
-                    turnInPlaceDir = Mathf.Sign(diff);
-                    if (Mathf.Abs(diff) < 5f) turningInPlace = false; // ya alineado
-                }
-            }
-        }
-        else turningInPlace = false;
+    #endregion
 
-        // --- Animación (opcional): alimenta el Animator si hay un modelo asignado ---
-        if (animator != null)
-        {
-            // Amortiguado: el movimiento arranca instantáneo, pero la mezcla de
-            // animación sube suave idle->walk->run ("arranca y luego corre").
-            animator.SetFloat("Speed", PlanarSpeed, 0.12f, Time.deltaTime);
-            animator.SetFloat("Turn", TurnSignal, 0.1f, Time.deltaTime);
-            animator.SetBool("Crouch", CurrentState == MoveState.Crouch);
-            // Apuntar / strafe libre (blend 2D direccional; comparten AimX/AimY)
-            animator.SetBool("Aiming", Aiming);
-            animator.SetBool("StrafeLock", StrafeLock);
-            animator.SetBool("TurningInPlace", turningInPlace);
-            animator.SetFloat("TurnInPlace", turnInPlaceDir, 0.08f, Time.deltaTime);
-            animator.SetInteger("AimStance", (int)CurrentStance); // 0 puños, 1 melé, 2 arma
-            animator.SetFloat("AimX", aimX, 0.1f, Time.deltaTime);
-            animator.SetFloat("AimY", aimY, 0.1f, Time.deltaTime);
-            AimX = aimX; AimY = aimY; // exponer para debug
-            // Arranque al caminar (se detectó arriba)
-            if (startWalkQueued) animator.SetTrigger("StartWalk");
-            if (turn180Queued) animator.SetTrigger("Turn180");
-            // Nivel (idle/caminar/correr) y lado (izq/der) del giro 180, congelados.
-            animator.SetFloat("Turn180Tier", turn180Tier);
-            animator.SetFloat("Turn180Dir", turn180Dir);
-        }
+    // ───────────────────────────────────────────────────────────────────────
+    #region Animator
+    // ───────────────────────────────────────────────────────────────────────
+
+    void UpdateAnimator()
+    {
+        if (animator == null) return;
+
+        // Damped so the blend eases idle→walk→run ("start then run").
+        animator.SetFloat("Speed", PlanarSpeed, 0.12f, Time.deltaTime);
+        animator.SetFloat("Turn", TurnSignal, 0.1f, Time.deltaTime);
+        animator.SetBool("Crouch", CurrentState == MoveState.Crouch);
+
+        // Aim / strafe (2D directional blend, shares AimX/AimY).
+        animator.SetBool("Aiming", Aiming);
+        animator.SetBool("StrafeLock", StrafeLock);
+        animator.SetInteger("AimStance", (int)CurrentStance);
+        animator.SetFloat("AimX", animAimX, 0.1f, Time.deltaTime);
+        animator.SetFloat("AimY", animAimY, 0.1f, Time.deltaTime);
+        AimX = animAimX; AimY = animAimY;
+
+        // In-place turn.
+        animator.SetBool("TurningInPlace", turningInPlace);
+        animator.SetFloat("TurnInPlace", animTurnInPlaceDir, 0.08f, Time.deltaTime);
+
+        // One-shot triggers detected earlier this frame.
+        if (startWalkQueued) animator.SetTrigger("StartWalk");
+        if (turn180Queued) animator.SetTrigger("Turn180");
+        animator.SetFloat("Turn180Tier", turn180Tier);
+        animator.SetFloat("Turn180Dir", turn180Dir);
+    }
+
+    void EndFrame()
+    {
         startWalkQueued = false;
         turn180Queued = false;
         prevState = CurrentState;
     }
 
-    // Rodada (esquiva): mueve al jugador en rollDir a rollSpeed durante rollDuration.
-    void UpdateRoll()
-    {
-        rollTimer += Time.deltaTime;
-        Vector3 move = rollDir * rollSpeed;
-        if (controller.isGrounded && verticalVelocity < 0f) verticalVelocity = -2f;
-        verticalVelocity += gravity * Time.deltaTime;
-        move.y = verticalVelocity;
-        controller.Move(move * Time.deltaTime);
-        PlanarSpeed = rollSpeed;
-        if (rollTimer >= rollDuration) rolling = false;
-    }
+    #endregion
 }
