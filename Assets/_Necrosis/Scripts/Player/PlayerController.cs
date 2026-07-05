@@ -15,6 +15,8 @@ using UnityEngine;
 /// concern stays isolated and readable.
 /// </summary>
 [RequireComponent(typeof(CharacterController))]
+[RequireComponent(typeof(PlayerInput))]
+[RequireComponent(typeof(PlayerAnimatorDriver))]
 public class PlayerController : MonoBehaviour
 {
     // ───────────────────────────────────────────────────────────────────────
@@ -67,8 +69,6 @@ public class PlayerController : MonoBehaviour
 
     [Header("References")]
     public Transform cameraTransform;     // Main Camera
-    [Tooltip("Rigged model Animator (e.g. Mixamo). If null, only the capsule moves.")]
-    public Animator animator;
 
     #endregion
 
@@ -101,6 +101,8 @@ public class PlayerController : MonoBehaviour
     // ───────────────────────────────────────────────────────────────────────
 
     CharacterController controller;
+    PlayerInput input;
+    PlayerAnimatorDriver animDriver;
     float normalHeight, normalCenterY;
     float verticalVelocity;
 
@@ -148,6 +150,8 @@ public class PlayerController : MonoBehaviour
     void Awake()
     {
         controller = GetComponent<CharacterController>();
+        input = GetComponent<PlayerInput>();
+        animDriver = GetComponent<PlayerAnimatorDriver>();
         normalHeight = controller.height;
         normalCenterY = controller.center.y;
         prevYaw = transform.eulerAngles.y;
@@ -184,17 +188,21 @@ public class PlayerController : MonoBehaviour
 
     void ReadInput()
     {
-        inH = Input.GetAxisRaw("Horizontal");
-        inV = Input.GetAxisRaw("Vertical");
-        moving = new Vector3(inH, 0f, inV).sqrMagnitude > 0.01f;
+        input.Sample();
+        inH = input.Horizontal;
+        inV = input.Vertical;
+        moving = input.Moving;
+        sprintHeld = input.SprintHeld;
 
-        if (Input.GetKeyDown(KeyCode.C)) runToggled = !runToggled;              // walk ↔ run
-        if (Input.GetKeyDown(KeyCode.LeftControl)) crouchToggled = !crouchToggled; // crouch
-        sprintHeld = Input.GetKey(KeyCode.LeftShift);                            // sprint (held)
-
-        if (Input.GetKeyDown(KeyCode.Alpha1)) CurrentStance = Stance.Fists;
-        if (Input.GetKeyDown(KeyCode.Alpha2)) CurrentStance = Stance.Melee;
-        if (Input.GetKeyDown(KeyCode.Alpha3)) CurrentStance = Stance.Gun;
+        // Interpret input edges into game state (toggles/stance live here, not in input).
+        if (input.RunTogglePressed) runToggled = !runToggled;              // walk ↔ run
+        if (input.CrouchTogglePressed) crouchToggled = !crouchToggled;     // crouch
+        switch (input.StancePressed)
+        {
+            case 0: CurrentStance = Stance.Fists; break;
+            case 1: CurrentStance = Stance.Melee; break;
+            case 2: CurrentStance = Stance.Gun; break;
+        }
 
         // Camera basis on the ground plane, reused by every movement path.
         if (cameraTransform != null)
@@ -213,7 +221,7 @@ public class PlayerController : MonoBehaviour
     /// <summary>Starts a roll on Space (grounded). Returns true if a roll began.</summary>
     bool TryStartRoll()
     {
-        if (!Input.GetKeyDown(KeyCode.Space) || !controller.isGrounded) return false;
+        if (!input.RollPressed || !controller.isGrounded) return false;
 
         rolling = true;
         rollTimer = 0f;
@@ -227,7 +235,7 @@ public class PlayerController : MonoBehaviour
             : Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
 
         transform.rotation = Quaternion.LookRotation(rollDir, Vector3.up);
-        if (animator != null) animator.SetTrigger("Roll");
+        animDriver.PlayRoll();
         UpdateRoll();
         return true;
     }
@@ -257,7 +265,7 @@ public class PlayerController : MonoBehaviour
     {
         // Strafe only while aiming (right mouse), works in any stance. Normal
         // movement turns to face the move direction instead of strafing.
-        Aiming = Input.GetMouseButton(1) && cameraTransform != null;
+        Aiming = input.AimHeld && cameraTransform != null;
         StrafeLock = false;                       // no auto-strafe
         faceCamera = Aiming;
         crouched = crouchToggled && !Aiming;      // aiming forces standing
@@ -514,30 +522,25 @@ public class PlayerController : MonoBehaviour
 
     void UpdateAnimator()
     {
-        if (animator == null) return;
+        AimX = animAimX; AimY = animAimY; // expose for debug/other systems
 
-        // Damped so the blend eases idle→walk→run ("start then run").
-        animator.SetFloat("Speed", PlanarSpeed, 0.12f, Time.deltaTime);
-        animator.SetFloat("Turn", TurnSignal, 0.1f, Time.deltaTime);
-        animator.SetBool("Crouch", CurrentState == MoveState.Crouch);
-
-        // Aim / strafe (2D directional blend, shares AimX/AimY).
-        animator.SetBool("Aiming", Aiming);
-        animator.SetBool("StrafeLock", StrafeLock);
-        animator.SetInteger("AimStance", (int)CurrentStance);
-        animator.SetFloat("AimX", animAimX, 0.1f, Time.deltaTime);
-        animator.SetFloat("AimY", animAimY, 0.1f, Time.deltaTime);
-        AimX = animAimX; AimY = animAimY;
-
-        // In-place turn.
-        animator.SetBool("TurningInPlace", turningInPlace);
-        animator.SetFloat("TurnInPlace", animTurnInPlaceDir, 0.08f, Time.deltaTime);
-
-        // One-shot triggers detected earlier this frame.
-        if (startWalkQueued) animator.SetTrigger("StartWalk");
-        if (turn180Queued) animator.SetTrigger("Turn180");
-        animator.SetFloat("Turn180Tier", turn180Tier);
-        animator.SetFloat("Turn180Dir", turn180Dir);
+        animDriver.Apply(new PlayerAnimatorDriver.Frame
+        {
+            speed = PlanarSpeed,
+            turn = TurnSignal,
+            crouch = CurrentState == MoveState.Crouch,
+            aiming = Aiming,
+            strafeLock = StrafeLock,
+            stance = (int)CurrentStance,
+            aimX = animAimX,
+            aimY = animAimY,
+            turningInPlace = turningInPlace,
+            turnInPlaceDir = animTurnInPlaceDir,
+            startWalk = startWalkQueued,
+            turn180 = turn180Queued,
+            turn180Tier = turn180Tier,
+            turn180Dir = turn180Dir,
+        });
     }
 
     void EndFrame()

@@ -23,8 +23,7 @@ public class PlayerHealth : MonoBehaviour
             Debug.Log("[NECROSIS] Así es como moriste."); // homenaje obligatorio
 
             // Animación de muerte (si hay modelo rigged); luego reinicia la escena
-            var animator = GetComponent<PlayerController>()?.animator;
-            if (animator != null) animator.SetTrigger("Die");
+            GetComponent<PlayerAnimatorDriver>()?.PlayDeath();
 
             Invoke(nameof(Reload), 4f); // deja ver la animación antes de recargar
         }

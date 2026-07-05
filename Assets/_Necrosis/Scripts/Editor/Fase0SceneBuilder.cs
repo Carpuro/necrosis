@@ -331,7 +331,10 @@ public static class Fase0SceneBuilder
         animator.runtimeAnimatorController =
             AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(PlayerAnimatorPath);
         animator.applyRootMotion = false;
-        movement.animator = animator;
+        // El Animator lo maneja PlayerAnimatorDriver (auto-agregado por RequireComponent).
+        var driver = movement.GetComponent<PlayerAnimatorDriver>();
+        if (driver == null) driver = movement.gameObject.AddComponent<PlayerAnimatorDriver>();
+        driver.animator = animator;
 
         var rend = player.GetComponent<MeshRenderer>();
         if (rend != null) rend.enabled = false;
