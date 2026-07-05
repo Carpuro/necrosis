@@ -35,6 +35,7 @@ public class PlayerController : MonoBehaviour
     // C = caminar/correr (toggle), Ctrl = agacharse (toggle), Shift = esprintar (mantener)
     bool runToggled;
     bool crouchToggled;
+    MoveState prevState = MoveState.Idle; // para detectar el arranque idle->caminar
 
     /// <summary>Velocidad horizontal real (m/s). La leen Animator y pasos.</summary>
     public float PlanarSpeed { get; private set; }
@@ -247,7 +248,11 @@ public class PlayerController : MonoBehaviour
             animator.SetInteger("AimStance", (int)CurrentStance); // 0 puños, 1 melé, 2 arma
             animator.SetFloat("AimX", aimX, 0.1f, Time.deltaTime);
             animator.SetFloat("AimY", aimY, 0.1f, Time.deltaTime);
+            // Arranque al caminar: sólo al pasar de parado a caminar de frente.
+            if (prevState == MoveState.Idle && CurrentState == MoveState.Walk && !faceCamera)
+                animator.SetTrigger("StartWalk");
         }
+        prevState = CurrentState;
     }
 
     // Rodada (esquiva): mueve al jugador en rollDir a rollSpeed durante rollDuration.

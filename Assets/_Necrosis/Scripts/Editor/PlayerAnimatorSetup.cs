@@ -27,6 +27,7 @@ public static class PlayerAnimatorSetup
     static readonly (string file, bool loop)[] Anims =
     {
         (AnimDir + "/locomotion/animation_ybot_idle.fbx",                     true),
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_walking.fbx",    false), // arranque al caminar
         (AnimDir + "/locomotion/animation_ybot_movement_walk_straight.fbx",   true),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left.fbx",  true),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right.fbx", true),
@@ -153,6 +154,7 @@ public static class PlayerAnimatorSetup
         controller.AddParameter("Aiming", AnimatorControllerParameterType.Bool);
         controller.AddParameter("StrafeLock", AnimatorControllerParameterType.Bool); // strafe libre (Left Alt)
         controller.AddParameter("Roll", AnimatorControllerParameterType.Trigger);    // esquiva (Espacio)
+        controller.AddParameter("StartWalk", AnimatorControllerParameterType.Trigger); // arranque idle->caminar
         controller.AddParameter("AimStance", AnimatorControllerParameterType.Int); // 0 puños,1 melé,2 arma
         controller.AddParameter("AimX", AnimatorControllerParameterType.Float); // strafe -1..+1
         controller.AddParameter("AimY", AnimatorControllerParameterType.Float); // atrás/adelante -1..+1
@@ -224,6 +226,16 @@ public static class PlayerAnimatorSetup
         var exitCancel = crouchExit.AddTransition(crouch);
         exitCancel.AddCondition(AnimatorConditionMode.If, 0, "Crouch");
         exitCancel.hasExitTime = false; exitCancel.duration = 0.1f;
+
+        // Arranque al caminar: al pasar de idle a caminar de frente, reproduce el
+        // clip de arranque y luego entra a locomoción. Trigger StartWalk.
+        var walkStart = sm.AddState("WalkStart");
+        walkStart.motion = LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_walking.fbx");
+        var toWalkStart = loco.AddTransition(walkStart);
+        toWalkStart.AddCondition(AnimatorConditionMode.If, 0, "StartWalk");
+        toWalkStart.hasExitTime = false; toWalkStart.duration = 0.05f;
+        var fromWalkStart = walkStart.AddTransition(loco);
+        fromWalkStart.hasExitTime = true; fromWalkStart.exitTime = 0.6f; fromWalkStart.duration = 0.15f;
 
         // Giro en el sitio (parado): blend 1D por TurnInPlace (izq/idle/der). Se
         // entra desde locomoción cuando TurningInPlace y sale al terminar. Visible.
