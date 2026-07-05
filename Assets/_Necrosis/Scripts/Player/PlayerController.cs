@@ -21,6 +21,12 @@ public class PlayerController : MonoBehaviour
     public float gravity = -20f;
     public float rotationSmoothness = 12f;
 
+    [Header("Aceleración (rampa idle->caminar->correr)")]
+    [Tooltip("Cuánto sube la velocidad por segundo: pasa por caminar antes de correr.")]
+    public float acceleration = 10f;
+    public float deceleration = 16f;
+    float currentSpeed; // velocidad actual suavizada (para la rampa natural)
+
     [Header("Referencias")]
     public Transform cameraTransform; // asignar la Main Camera
 
@@ -153,19 +159,20 @@ public class PlayerController : MonoBehaviour
         else if (runToggled) CurrentState = MoveState.Run;
         else CurrentState = MoveState.Walk;
 
-        // --- Arranque al caminar (estilo ARC): SOLO idle->caminar de frente
-        //     (no correr/esprint/strafe). Mientras dura, el jugador NO avanza:
-        //     el paso de arranque se planta sin deslizar (nada de shuffle). ---
-        if (prevState == MoveState.Idle && CurrentState == MoveState.Walk &&
-            !faceCamera && !runToggled && !sprintHeld)
+        // --- Arranque (estilo ARC): al pasar de parado a moverse de frente
+        //     (caminar/correr/esprint), planta el paso de arranque y NO avanza
+        //     mientras dura; luego la velocidad sube en rampa idle->caminar->correr. ---
+        bool groundMove = CurrentState == MoveState.Walk || CurrentState == MoveState.Run ||
+                          CurrentState == MoveState.Sprint;
+        if (prevState == MoveState.Idle && groundMove && !faceCamera && !crouched)
         {
             walkStartTimer = walkStartDuration;
             startWalkQueued = true; // dispara el trigger del Animator abajo
         }
         bool startingWalk = walkStartTimer > 0f;
         if (startingWalk) walkStartTimer -= Time.deltaTime;
-        // Cancelar si dejas de moverte o cambias a correr/strafe
-        if (CurrentState != MoveState.Walk || faceCamera) { walkStartTimer = 0f; startingWalk = false; }
+        // Cancelar si dejas de moverte o pasas a apuntar/agacharte
+        if (!moving || faceCamera || crouched) { walkStartTimer = 0f; startingWalk = false; }
 
         // Altura del collider al agacharse.
         float targetHeight = crouched ? normalHeight * 0.55f : normalHeight;
@@ -203,20 +210,26 @@ public class PlayerController : MonoBehaviour
             else if (moving)
             {
                 Vector3 worldDir = (camForward * v + camRight * h).normalized;
-                float speed = CurrentState switch
+                // Velocidad objetivo por estado; durante el arranque es 0 (no avanza).
+                float targetSpeed = startingWalk ? 0f : CurrentState switch
                 {
                     MoveState.Crouch => crouchSpeed,
                     MoveState.Sprint => sprintSpeed,
                     MoveState.Run => runSpeed,
                     _ => walkSpeed
                 };
-                move = worldDir * speed;
+                // Rampa: la velocidad SUBE gradualmente (idle->caminar->correr), así
+                // la mezcla de animación pasa por caminar antes de correr.
+                float rate = targetSpeed > currentSpeed ? acceleration : deceleration;
+                currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, rate * Time.deltaTime);
+                move = worldDir * currentSpeed;
 
                 // Rotar el cuerpo hacia la dirección de movimiento
                 Quaternion targetRot = Quaternion.LookRotation(worldDir, Vector3.up);
                 transform.rotation = Quaternion.Slerp(transform.rotation, targetRot,
                     rotationSmoothness * Time.deltaTime);
             }
+            else currentSpeed = 0f; // parado: reinicia la rampa
         }
 
         // Arranque al caminar: no avanzar mientras se planta el paso (sin shuffle).
