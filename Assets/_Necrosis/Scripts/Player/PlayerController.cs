@@ -168,15 +168,21 @@ public class PlayerController : MonoBehaviour
 
             if (faceCamera)
             {
-                // Apuntar o strafe libre: el cuerpo mira SIEMPRE hacia la cámara y
-                // el movimiento es lateral/atrás respecto a ese eje. WASD = ejes del cuerpo.
+                // Apuntar o strafe libre: el cuerpo mira SIEMPRE hacia la cámara.
                 Quaternion look = Quaternion.LookRotation(camForward, Vector3.up);
                 transform.rotation = Quaternion.Slerp(transform.rotation, look,
                     rotationSmoothness * Time.deltaTime);
                 // Apuntar usa aimSpeed (más lento); strafe libre desarmado usa walk.
                 float faceSpeed = Aiming ? aimSpeed : walkSpeed;
-                if (moving) move = (camForward * v + camRight * h).normalized * faceSpeed;
-                aimX = h; aimY = v;
+                if (moving)
+                {
+                    Vector3 wish = (camForward * v + camRight * h).normalized;
+                    move = wish * faceSpeed;
+                    // Ejes de strafe RELATIVOS AL CUERPO (no input crudo): así la
+                    // animación coincide con el movimiento aunque el cuerpo gire.
+                    Vector3 local = transform.InverseTransformDirection(wish);
+                    aimX = local.x; aimY = local.z;
+                }
             }
             else if (moving)
             {
