@@ -161,6 +161,7 @@ public static class PlayerAnimatorSetup
         controller.AddParameter("Die", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("TurningInPlace", AnimatorControllerParameterType.Bool);
         controller.AddParameter("TurnInPlace", AnimatorControllerParameterType.Float); // -1 izq..+1 der
+        controller.AddParameter("TurnInPlaceSpeed", AnimatorControllerParameterType.Float); // multiplicador (90=2, 180=4)
         controller.AddParameter("Aiming", AnimatorControllerParameterType.Bool);
         controller.AddParameter("StrafeLock", AnimatorControllerParameterType.Bool); // strafe libre (Left Alt)
         controller.AddParameter("Roll", AnimatorControllerParameterType.Trigger);    // esquiva (Espacio)
@@ -276,7 +277,11 @@ public static class PlayerAnimatorSetup
         // -2 180-left · -1 90-left · 0 idle · +1 90-right · +2 180-right.
         // Entered from locomotion while TurningInPlace; exits when it clears.
         var turnIP = controller.CreateBlendTreeInController("TurnInPlace", out BlendTree tip, 0);
-        turnIP.speed = 2f; // discrete turn twice as fast (rotation follows normalizedTime, stays synced)
+        // Playback speed driven by TurnInPlaceSpeed param (90=2x, 180=4x) so the 180
+        // is twice as fast as the 90. Rotation follows normalizedTime, stays synced.
+        turnIP.speed = 1f;
+        turnIP.speedParameterActive = true;
+        turnIP.speedParameter = "TurnInPlaceSpeed";
         tip.blendType = BlendTreeType.Simple1D;
         tip.blendParameter = "TurnInPlace";
         tip.useAutomaticThresholds = false;

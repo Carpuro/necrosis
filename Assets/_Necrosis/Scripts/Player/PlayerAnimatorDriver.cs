@@ -62,6 +62,7 @@ public class PlayerAnimatorDriver : MonoBehaviour
         public bool turn180;           // one-shot trigger
         public float turn180Tier;      // 0 idle · 1 walk · 2 run
         public float turn180Dir;       // -1 left · +1 right
+        public float turnInPlaceSpeed; // playback multiplier for the idle-turn state
     }
 
     /// <summary>Feeds one frame of state to the Animator. No-op if unassigned.</summary>
@@ -87,6 +88,7 @@ public class PlayerAnimatorDriver : MonoBehaviour
         // In-place turn.
         animator.SetBool("TurningInPlace", f.turningInPlace);
         animator.SetFloat("TurnInPlace", f.turnInPlaceDir, 0.08f, dt);
+        animator.SetFloat("TurnInPlaceSpeed", f.turnInPlaceSpeed);
 
         // One-shot triggers detected this frame.
         if (f.startWalk) animator.SetTrigger("StartWalk");

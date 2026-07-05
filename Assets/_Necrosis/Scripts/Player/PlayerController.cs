@@ -447,9 +447,10 @@ public class PlayerController : MonoBehaviour
         // angle — no foot slide. Steering handles any small remainder afterwards.
         turn180To = Quaternion.Euler(0f, transform.eulerAngles.y + 180f * turn180Dir, 0f);
 
-        // Freeze the speed tier at trigger time so idle/walk/run pick the right clip.
-        turn180Tier = currentSpeed < 0.5f ? 0f
-                    : (currentSpeed < runSpeed - 1f ? 1f : 2f);
+        // Tier by the intended STATE (not instantaneous speed, which is still ramping
+        // when you just started running → would wrongly pick the walk-180 clip).
+        turn180Tier = (CurrentState == MoveState.Run || CurrentState == MoveState.Sprint) ? 2f
+                    : (CurrentState == MoveState.Walk ? 1f : 0f);
     }
 
     /// <summary>While turning 180: don't advance, keep the speed (so it resumes
@@ -619,6 +620,8 @@ public class PlayerController : MonoBehaviour
             turn180 = turn180Queued,
             turn180Tier = turn180Tier,
             turn180Dir = turn180Dir,
+            // Idle 180 plays 2x faster than the 90 (4x vs 2x base).
+            turnInPlaceSpeed = Mathf.Abs(turnSelect) > 1.5f ? 4f : 2f,
         });
     }
 
