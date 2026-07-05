@@ -48,14 +48,12 @@ public class PlayerController : MonoBehaviour
              "from firing right after moving (reversals, turns).")]
     public float walkStartIdleDelay = 0.4f;
 
-    [Header("In-place turn (standing)")]
-    [Tooltip("Angle vs. camera that triggers the standing turn.")]
-    public float turnInPlaceThreshold = 50f;
-    [Tooltip("Angular speed (deg/s) when turning in place.")]
-    public float turnInPlaceSpeed = 240f;
-    [Tooltip("Seconds standing still before the in-place turn may engage. Stops it " +
-             "from firing during/right after a walking turn or a quick stop.")]
-    public float turnInPlaceIdleDelay = 0.3f;
+    [Header("Discrete start turn (from idle)")]
+    [Tooltip("Min angle between facing and pressed direction to play a discrete turn. " +
+             "Below it you just start walking forward.")]
+    public float startTurnMinAngle = 45f;
+    public float startTurn90Duration = 0.4f;
+    public float startTurn180Duration = 0.55f;
 
     [Header("180 turn (reverse direction)")]
     [Tooltip("Angle vs. last heading that triggers the 180.")]
@@ -129,8 +127,11 @@ public class PlayerController : MonoBehaviour
     float turn180Dir;                        // -1 left · +1 right (turn side)
     Vector3 lastMoveDir = Vector3.forward;   // last heading (persists through brief pauses)
 
-    // In-place turn runtime.
-    bool turningInPlace;
+    // Discrete start-turn runtime (idle → face pressed direction, then move).
+    bool discreteTurning;
+    float discreteTimer, discreteDuration;
+    Quaternion discreteFrom, discreteTo;
+    float turnSelect;            // -2 180L · -1 90L · +1 90R · +2 180R
     float prevYaw;
 
     // Dodge roll runtime.
@@ -142,7 +143,7 @@ public class PlayerController : MonoBehaviour
     float inH, inV;
     bool sprintHeld, moving, faceCamera, crouched, startingWalk;
     Vector3 camForward, camRight, frameMove;
-    float animAimX, animAimY, animTurnInPlaceDir;
+    float animAimX, animAimY;
 
     #endregion
 
@@ -173,12 +174,12 @@ public class PlayerController : MonoBehaviour
         UpdateStanceAndAiming();
         UpdateMoveState();
         UpdateWalkStart();
+        UpdateStartTurn();
         ApplyCrouchHeight();
         HandleMovement();
         ApplyGravityAndMove();
         UpdatePlanarSpeed();
         UpdateTurnSignal();
-        UpdateTurnInPlace();
         UpdateAnimator();
         EndFrame();
     }
@@ -343,7 +344,11 @@ public class PlayerController : MonoBehaviour
         animAimX = animAimY = 0f;
         if (cameraTransform == null) return;
 
-        if (faceCamera) AimMovement();
+        // A discrete turn always completes (even a quick tap). Only aim/crouch abort it.
+        if (discreteTurning && (faceCamera || crouched)) discreteTurning = false;
+
+        if (discreteTurning) UpdateDiscreteTurn();      // gates movement like the 180
+        else if (faceCamera) AimMovement();
         else if (moving) GroundMovement();
         else DecelerateWhileIdle();
 
@@ -457,36 +462,71 @@ public class PlayerController : MonoBehaviour
     #endregion
 
     // ───────────────────────────────────────────────────────────────────────
-    #region In-place turn (standing)
+    #region Discrete start turn (idle → face pressed direction)
     // ───────────────────────────────────────────────────────────────────────
 
-    void UpdateTurnInPlace()
+    /// <summary>From idle, if the pressed direction is far off the current facing,
+    /// play a discrete turn (90 L/R or 180) in place; movement resumes after.</summary>
+    void UpdateStartTurn()
     {
-        animTurnInPlaceDir = 0f;
+        if (discreteTurning) return; // already turning; HandleMovement drives it
 
-        // Only when genuinely idle for a moment — never during/right after walking
-        // (otherwise a walking turn or a quick stop pops the idle-turn animation).
-        if (Aiming || CurrentState != MoveState.Idle || cameraTransform == null
-            || idleTime < turnInPlaceIdleDelay)
+        // Fresh start from a real stop, moving forward-ish input, not aiming/crouched.
+        bool freshStart = prevState == MoveState.Idle && moving && !faceCamera && !crouched
+                          && !turning180 && idleTime >= walkStartIdleDelay
+                          && cameraTransform != null;
+        if (!freshStart) return;
+
+        Vector3 worldDir = (camForward * inV + camRight * inH).normalized;
+        if (worldDir.sqrMagnitude < 0.01f) return;
+
+        float ang = Vector3.SignedAngle(transform.forward, worldDir, Vector3.up); // -180..+180
+        if (Mathf.Abs(ang) < startTurnMinAngle) return; // forward-ish → normal walk start
+
+        // Pick clip: 90 or 180, and side.
+        if (Mathf.Abs(ang) > 135f)
         {
-            turningInPlace = false;
-            return;
+            // 180: side by mouse (fallback to signed angle, then right).
+            float side = Mathf.Abs(input.MouseX) > 0.01f ? Mathf.Sign(input.MouseX)
+                       : (Mathf.Abs(ang) < 179f ? Mathf.Sign(ang) : 1f);
+            turnSelect = 2f * side;
+            discreteDuration = startTurn180Duration;
+        }
+        else
+        {
+            turnSelect = Mathf.Sign(ang); // ±1 = 90 L/R
+            discreteDuration = startTurn90Duration;
         }
 
-        Vector3 camF = Vector3.ProjectOnPlane(cameraTransform.forward, Vector3.up);
-        if (camF.sqrMagnitude <= 0.001f) return;
+        discreteTurning = true;
+        discreteTimer = 0f;
+        discreteFrom = transform.rotation;
+        discreteTo = Quaternion.LookRotation(worldDir, Vector3.up);
+        // Cancel the forward walk-start; the discrete turn takes over.
+        startWalkQueued = false; walkStartTimer = 0f; startingWalk = false;
+    }
 
-        float camYaw = Quaternion.LookRotation(camF).eulerAngles.y;
-        float diff = Mathf.DeltaAngle(transform.eulerAngles.y, camYaw);
+    /// <summary>Rotates over the discrete turn clip without advancing. Called from
+    /// HandleMovement so it gates movement just like the 180.</summary>
+    void UpdateDiscreteTurn()
+    {
+        frameMove = Vector3.zero;
+        currentSpeed = 0f;
+        discreteTimer += Time.deltaTime;
+        float t = Mathf.Clamp01(discreteTimer / discreteDuration);
+        transform.rotation = Quaternion.Slerp(discreteFrom, discreteTo, t);
 
-        if (Mathf.Abs(diff) > turnInPlaceThreshold) turningInPlace = true;
-        if (!turningInPlace) return;
+        if (t < 1f) return;
+        discreteTurning = false;
 
-        float step = Mathf.Clamp(diff, -turnInPlaceSpeed * Time.deltaTime,
-                                        turnInPlaceSpeed * Time.deltaTime);
-        transform.Rotate(0f, step, 0f);
-        animTurnInPlaceDir = Mathf.Sign(diff);
-        if (Mathf.Abs(diff) < 5f) turningInPlace = false; // aligned
+        // The turn itself never ramps. Only if you're STILL holding the direction
+        // when it finishes does the walk-start ramp fire and you move off; a single
+        // tap just leaves you turned, standing.
+        if (moving)
+        {
+            walkStartTimer = walkStartDuration;
+            startWalkQueued = true;
+        }
     }
 
     #endregion
@@ -540,8 +580,8 @@ public class PlayerController : MonoBehaviour
             stance = (int)CurrentStance,
             aimX = animAimX,
             aimY = animAimY,
-            turningInPlace = turningInPlace,
-            turnInPlaceDir = animTurnInPlaceDir,
+            turningInPlace = discreteTurning,
+            turnInPlaceDir = turnSelect,
             startWalk = startWalkQueued,
             turn180 = turn180Queued,
             turn180Tier = turn180Tier,

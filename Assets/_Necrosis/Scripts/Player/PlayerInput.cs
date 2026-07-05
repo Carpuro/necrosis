@@ -18,6 +18,7 @@ public class PlayerInput : MonoBehaviour
 
     public bool SprintHeld { get; private set; }   // Shift held
     public bool AimHeld { get; private set; }       // right mouse held
+    public float MouseX { get; private set; }       // horizontal mouse delta (180 side)
 
     public bool RunTogglePressed { get; private set; }    // C down
     public bool CrouchTogglePressed { get; private set; } // Ctrl down
@@ -34,6 +35,7 @@ public class PlayerInput : MonoBehaviour
 
         SprintHeld = Input.GetKey(KeyCode.LeftShift);
         AimHeld = Input.GetMouseButton(1);
+        MouseX = Input.GetAxis("Mouse X");
 
         RunTogglePressed = Input.GetKeyDown(KeyCode.C);
         CrouchTogglePressed = Input.GetKeyDown(KeyCode.LeftControl);

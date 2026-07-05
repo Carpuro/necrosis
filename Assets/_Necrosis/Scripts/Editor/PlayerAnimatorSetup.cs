@@ -35,6 +35,8 @@ public static class PlayerAnimatorSetup
         (AnimDir + "/locomotion/animation_ybot_movement_run_turn_right.fbx",  true),
         (AnimDir + "/locomotion/animation_ybot_idle_movement_turn_left_180.fbx",  false),
         (AnimDir + "/locomotion/animation_ybot_idle_movement_turn_right_180.fbx", false),
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_turn_left_90.fbx",   false),
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_turn_right_90.fbx",  false),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_180_right.fbx", false),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_180_left.fbx",  false),
         (AnimDir + "/locomotion/animation_ybot_movement_run_turn_180_right.fbx",  false),
@@ -270,15 +272,18 @@ public static class PlayerAnimatorSetup
         var fromTurn180 = turn180.AddTransition(loco);
         fromTurn180.hasExitTime = true; fromTurn180.exitTime = 0.7f; fromTurn180.duration = 0.12f;
 
-        // Giro en el sitio (parado): blend 1D por TurnInPlace (izq/idle/der). Se
-        // entra desde locomoción cuando TurningInPlace y sale al terminar. Visible.
+        // Discrete start turn (from idle): 1D blend by TurnInPlace select value:
+        // -2 180-left · -1 90-left · 0 idle · +1 90-right · +2 180-right.
+        // Entered from locomotion while TurningInPlace; exits when it clears.
         var turnIP = controller.CreateBlendTreeInController("TurnInPlace", out BlendTree tip, 0);
         tip.blendType = BlendTreeType.Simple1D;
         tip.blendParameter = "TurnInPlace";
         tip.useAutomaticThresholds = false;
-        tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_turninplace_left.fbx"),  -1f);
+        tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_turn_left_180.fbx"),  -2f);
+        tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_turn_left_90.fbx"),   -1f);
         tip.AddChild(idle, 0f);
-        tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_turninplace_right.fbx"),  1f);
+        tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_turn_right_90.fbx"),   1f);
+        tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_turn_right_180.fbx"),  2f);
 
         var toTurnIP = loco.AddTransition(turnIP);
         toTurnIP.AddCondition(AnimatorConditionMode.If, 0, "TurningInPlace");
