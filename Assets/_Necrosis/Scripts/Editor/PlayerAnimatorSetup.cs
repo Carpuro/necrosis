@@ -262,7 +262,7 @@ public static class PlayerAnimatorSetup
         {
             string s = Stances[i];
             var aim = controller.CreateBlendTreeInController("Aim_" + s, out BlendTree t, 0);
-            t.blendType = BlendTreeType.SimpleDirectional2D;
+            t.blendType = BlendTreeType.FreeformCartesian2D;
             t.blendParameter = "AimX";
             t.blendParameterY = "AimY";
             string p = $"{AnimDir}/aim/{s}/animation_ybot_aim_{s}_";
@@ -285,7 +285,7 @@ public static class PlayerAnimatorSetup
         // Strafe libre (sin apuntar): blend 2D direccional con clips normales
         // (no de combate). Comparte AimX/AimY. Left Alt lo activa.
         var strafe = controller.CreateBlendTreeInController("Strafe", out BlendTree st, 0);
-        st.blendType = BlendTreeType.SimpleDirectional2D;
+        st.blendType = BlendTreeType.FreeformCartesian2D;
         st.blendParameter = "AimX";
         st.blendParameterY = "AimY";
         st.AddChild(idle, new Vector2(0f, 0f));
