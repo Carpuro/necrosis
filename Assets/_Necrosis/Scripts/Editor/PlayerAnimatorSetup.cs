@@ -29,10 +29,12 @@ public static class PlayerAnimatorSetup
         (AnimDir + "/idle.fbx",        true),
         (AnimDir + "/walk.fbx",        true),
         (AnimDir + "/run.fbx",         true),
+        (AnimDir + "/run_fast.fbx",    true),
         (AnimDir + "/crouch_idle.fbx",    true),
         (AnimDir + "/crouch_walking.fbx", true),
         (AnimDir + "/melee_kick.fbx",  false),
         (AnimDir + "/melee_swing.fbx", false),
+        (AnimDir + "/dying.fbx",       false),
         (AnimDir + "/death.fbx",       false),
     };
 
@@ -82,6 +84,7 @@ public static class PlayerAnimatorSetup
         var controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
         controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
         controller.AddParameter("Crouch", AnimatorControllerParameterType.Bool);
+        controller.AddParameter("Die", AnimatorControllerParameterType.Trigger);
 
         var sm = controller.layers[0].stateMachine;
 
@@ -92,7 +95,7 @@ public static class PlayerAnimatorSetup
         tree.useAutomaticThresholds = false; // respetar umbrales en m/s reales
         tree.AddChild(LoadClip(AnimDir + "/idle.fbx"), 0f);
         tree.AddChild(LoadClip(AnimDir + "/walk.fbx"), 3.5f);  // walkSpeed
-        tree.AddChild(LoadClip(AnimDir + "/run.fbx"), 6f);     // < runSpeed (6.5) para alcanzar el nodo con amortiguado
+        tree.AddChild(LoadClip(AnimDir + "/run_fast.fbx"), 6f); // sprint; < runSpeed (6.5) para alcanzarlo con amortiguado
         sm.defaultState = loco;
 
         // Agachado: blend por Speed (crouch_idle quieto -> crouch_walking en movimiento)
@@ -112,6 +115,15 @@ public static class PlayerAnimatorSetup
         fromCrouch.AddCondition(AnimatorConditionMode.IfNot, 0, "Crouch");
         fromCrouch.hasExitTime = false;
         fromCrouch.duration = 0.15f;
+
+        // Muerte: desde cualquier estado al disparar "Die" (PlayerHealth). No vuelve.
+        var death = sm.AddState("Death");
+        death.motion = LoadClip(AnimDir + "/dying.fbx");
+        var toDeath = sm.AddAnyStateTransition(death);
+        toDeath.AddCondition(AnimatorConditionMode.If, 0, "Die");
+        toDeath.hasExitTime = false;
+        toDeath.duration = 0.1f;
+        toDeath.canTransitionToSelf = false;
 
         AssetDatabase.SaveAssets();
     }

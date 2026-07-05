@@ -21,8 +21,12 @@ public class PlayerHealth : MonoBehaviour
         {
             IsDead = true;
             Debug.Log("[NECROSIS] Así es como moriste."); // homenaje obligatorio
-            // Fase 0: reinicio simple de escena a los 3 segundos
-            Invoke(nameof(Reload), 3f);
+
+            // Animación de muerte (si hay modelo rigged); luego reinicia la escena
+            var animator = GetComponent<PlayerController>()?.animator;
+            if (animator != null) animator.SetTrigger("Die");
+
+            Invoke(nameof(Reload), 4f); // deja ver la animación antes de recargar
         }
     }
 

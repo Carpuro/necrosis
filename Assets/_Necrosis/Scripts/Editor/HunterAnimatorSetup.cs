@@ -94,8 +94,8 @@ public static class HunterAnimatorSetup
         tree.blendParameter = "Speed";
         tree.useAutomaticThresholds = false; // respetar los umbrales en m/s reales (si no, Unity los reparte 0..1)
         tree.AddChild(LoadClip(AnimDir + "/zombie_idle.fbx"), 0f);
-        tree.AddChild(LoadClip(AnimDir + "/zombie_walk.fbx"), 1.5f);
-        tree.AddChild(LoadClip(AnimDir + "/zombie_run.fbx"), 3f); // < chase (4.2) para que correr SÍ aparezca
+        tree.AddChild(LoadClip(AnimDir + "/zombie_walk.fbx"), 1f);
+        tree.AddChild(LoadClip(AnimDir + "/zombie_run.fbx"), 2f); // la persecución baja a ~2.3 con poca luz; patrulla ~1.6 se queda en walk
         sm.defaultState = loco;
 
         // Ataque: desde cualquier estado cuando Attacking; vuelve al soltarlo
