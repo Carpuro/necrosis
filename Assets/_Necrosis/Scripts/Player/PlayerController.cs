@@ -32,6 +32,14 @@ public class PlayerController : MonoBehaviour
     /// <summary>Velocidad horizontal real (m/s). La leen Animator y pasos.</summary>
     public float PlanarSpeed { get; private set; }
 
+    /// <summary>Giro normalizado: -1 (izquierda) .. +1 (derecha). Lo lee el Animator.</summary>
+    public float TurnSignal { get; private set; }
+
+    [Header("Giro")]
+    [Tooltip("Velocidad angular (grados/s) que corresponde al giro completo de la animación.")]
+    public float turnRateForFullBlend = 160f;
+    float prevYaw;
+
     CharacterController controller;
     float verticalVelocity;
     float normalHeight;
@@ -42,6 +50,7 @@ public class PlayerController : MonoBehaviour
         controller = GetComponent<CharacterController>();
         normalHeight = controller.height;
         normalCenterY = controller.center.y;
+        prevYaw = transform.eulerAngles.y;
         if (cameraTransform == null && Camera.main != null)
             cameraTransform = Camera.main.transform;
     }
@@ -104,12 +113,19 @@ public class PlayerController : MonoBehaviour
         // Velocidad horizontal real (para Animator y pasos)
         PlanarSpeed = new Vector3(move.x, 0f, move.z).magnitude;
 
+        // Señal de giro: velocidad angular en yaw, normalizada a -1 (izq) .. +1 (der)
+        float yaw = transform.eulerAngles.y;
+        float yawRate = Mathf.DeltaAngle(prevYaw, yaw) / Mathf.Max(Time.deltaTime, 1e-4f);
+        prevYaw = yaw;
+        TurnSignal = Mathf.Clamp(yawRate / turnRateForFullBlend, -1f, 1f);
+
         // --- Animación (opcional): alimenta el Animator si hay un modelo asignado ---
         if (animator != null)
         {
             // Amortiguado: el movimiento arranca instantáneo, pero la mezcla de
             // animación sube suave idle->walk->run ("arranca y luego corre").
             animator.SetFloat("Speed", PlanarSpeed, 0.12f, Time.deltaTime);
+            animator.SetFloat("Turn", TurnSignal, 0.1f, Time.deltaTime);
             animator.SetBool("Crouch", CurrentState == MoveState.Crouch);
         }
     }

@@ -28,15 +28,20 @@ public static class PlayerAnimatorSetup
     {
         (AnimDir + "/locomotion/animation_ybot_idle.fbx",                     true),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_straight.fbx",   true),
+        (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left.fbx",  true),
+        (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right.fbx", true),
         (AnimDir + "/locomotion/animation_ybot_movement_run_straight.fbx",    true),
         (AnimDir + "/locomotion/animation_ybot_movement_run_straight_fast.fbx", true),
         (AnimDir + "/locomotion/animation_ybot_crouch_idle.fbx",              true),
         (AnimDir + "/locomotion/animation_ybot_crouch_movement_straight.fbx", true),
         (AnimDir + "/melee/animation_ybot_melee_kick.fbx",                    false),
         (AnimDir + "/melee/animation_ybot_melee_swing.fbx",                   false),
-        (AnimDir + "/death/animation_ybot_death_2.fbx",                       false),
         (AnimDir + "/death/animation_ybot_death_1.fbx",                       false),
+        (AnimDir + "/death/animation_ybot_death_2.fbx",                       false),
     };
+
+    // El clip de giro a la derecha es el de la izquierda ESPEJADO (no hay right nativo).
+    const string MirrorClip = "animation_ybot_movement_walk_turn_right.fbx";
 
     [MenuItem("Necrosis/Setup animación del Jugador")]
     public static void Run()
@@ -61,10 +66,15 @@ public static class PlayerAnimatorSetup
         imp.animationType = ModelImporterAnimationType.Human;
         imp.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
 
-        if (loop.HasValue)
+        bool mirror = path.EndsWith(MirrorClip);
+        if (loop.HasValue || mirror)
         {
             var clips = imp.defaultClipAnimations;
-            for (int i = 0; i < clips.Length; i++) clips[i].loopTime = loop.Value;
+            for (int i = 0; i < clips.Length; i++)
+            {
+                if (loop.HasValue) clips[i].loopTime = loop.Value;
+                if (mirror) clips[i].mirror = true; // giro derecha = izquierda espejado
+            }
             if (clips.Length > 0) imp.clipAnimations = clips;
         }
         imp.SaveAndReimport();
@@ -83,19 +93,30 @@ public static class PlayerAnimatorSetup
     {
         var controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
         controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
+        controller.AddParameter("Turn", AnimatorControllerParameterType.Float);   // -1 izq .. +1 der
         controller.AddParameter("Crouch", AnimatorControllerParameterType.Bool);
         controller.AddParameter("Die", AnimatorControllerParameterType.Trigger);
 
         var sm = controller.layers[0].stateMachine;
 
-        // Locomoción de pie: blend 1D por Speed (m/s reales del PlayerController)
+        // Locomoción de pie: blend 2D (X=Turn, Y=Speed). idle->walk->run recto y
+        // giros a izq/der al caminar y correr (giro derecha = izquierda espejado).
         var loco = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
-        tree.blendType = BlendTreeType.Simple1D;
-        tree.blendParameter = "Speed";
-        tree.useAutomaticThresholds = false; // respetar umbrales en m/s reales
-        tree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle.fbx"), 0f);
-        tree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_straight.fbx"), 3.5f);  // walkSpeed
-        tree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_movement_run_straight_fast.fbx"), 6f); // sprint; < runSpeed (6.5) con amortiguado
+        tree.blendType = BlendTreeType.FreeformCartesian2D;
+        tree.blendParameter = "Turn";    // X
+        tree.blendParameterY = "Speed";  // Y
+        var idle    = LoadClip(AnimDir + "/locomotion/animation_ybot_idle.fbx");
+        var walkS   = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_straight.fbx");
+        var walkL   = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left.fbx");
+        var walkR   = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right.fbx");
+        var runF    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_run_straight_fast.fbx");
+        tree.AddChild(idle,  new Vector2( 0f, 0f));
+        tree.AddChild(walkS, new Vector2( 0f, 3.5f)); // walkSpeed
+        tree.AddChild(walkL, new Vector2(-1f, 3.5f)); // giro izq caminando
+        tree.AddChild(walkR, new Vector2( 1f, 3.5f)); // giro der caminando
+        tree.AddChild(runF,  new Vector2( 0f, 6f));   // sprint (<runSpeed 6.5)
+        tree.AddChild(walkL, new Vector2(-1f, 6f));   // giro izq corriendo (reusa walk turn)
+        tree.AddChild(walkR, new Vector2( 1f, 6f));   // giro der corriendo
         sm.defaultState = loco;
 
         // Agachado: blend por Speed (crouch_idle quieto -> crouch_walking en movimiento)
@@ -118,7 +139,7 @@ public static class PlayerAnimatorSetup
 
         // Muerte: desde cualquier estado al disparar "Die" (PlayerHealth). No vuelve.
         var death = sm.AddState("Death");
-        death.motion = LoadClip(AnimDir + "/death/animation_ybot_death_2.fbx");
+        death.motion = LoadClip(AnimDir + "/death/animation_ybot_death_1.fbx"); // 1ª variante
         var toDeath = sm.AddAnyStateTransition(death);
         toDeath.AddCondition(AnimatorConditionMode.If, 0, "Die");
         toDeath.hasExitTime = false;
