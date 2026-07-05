@@ -80,7 +80,7 @@ public class DebugHUD : MonoBehaviour
             }
         }
 
-        GUILayout.Label("WASD mover · C caminar/correr · Shift esprint · Ctrl agacharse · F linterna · H ocultar", style);
+        GUILayout.Label("WASD · C caminar/correr · Shift esprint · Ctrl agacharse · Clic der. apuntar · 1/2/3 puños/melé/arma · F linterna · H", style);
         GUILayout.EndArea();
     }
 }

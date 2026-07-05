@@ -45,6 +45,11 @@ public class PlayerController : MonoBehaviour
     /// <summary>True mientras se apunta/strafea (clic derecho mantenido).</summary>
     public bool Aiming { get; private set; }
 
+    // Postura de combate seleccionada (1 puños, 2 melé, 3 arma). Decide qué set
+    // de animaciones de strafe usa el modo apuntar.
+    public enum Stance { Fists, Melee, Gun }
+    public Stance CurrentStance { get; private set; } = Stance.Fists;
+
     [Header("Giro")]
     [Tooltip("Velocidad angular (grados/s) que corresponde al giro completo de la animación.")]
     public float turnRateForFullBlend = 160f;
@@ -73,6 +78,9 @@ public class PlayerController : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.C)) runToggled = !runToggled;             // caminar <-> correr (toggle)
         if (Input.GetKeyDown(KeyCode.LeftControl)) crouchToggled = !crouchToggled; // agacharse (toggle)
         bool sprintHeld = Input.GetKey(KeyCode.LeftShift);                     // esprint (mantener)
+        if (Input.GetKeyDown(KeyCode.Alpha1)) CurrentStance = Stance.Fists;   // 1 puños
+        if (Input.GetKeyDown(KeyCode.Alpha2)) CurrentStance = Stance.Melee;   // 2 melé
+        if (Input.GetKeyDown(KeyCode.Alpha3)) CurrentStance = Stance.Gun;     // 3 arma
 
         Vector3 inputDir = new Vector3(h, 0f, v).normalized;
         bool moving = inputDir.sqrMagnitude > 0.01f;
@@ -159,6 +167,7 @@ public class PlayerController : MonoBehaviour
             animator.SetBool("Crouch", CurrentState == MoveState.Crouch);
             // Apuntar/strafe (blend 2D direccional)
             animator.SetBool("Aiming", Aiming);
+            animator.SetInteger("AimStance", (int)CurrentStance); // 0 puños, 1 melé, 2 arma
             animator.SetFloat("AimX", aimX, 0.1f, Time.deltaTime);
             animator.SetFloat("AimY", aimY, 0.1f, Time.deltaTime);
         }

@@ -40,12 +40,11 @@ public static class PlayerAnimatorSetup
         (AnimDir + "/melee/animation_ybot_melee_swing.fbx",                   false),
         (AnimDir + "/death/animation_ybot_death_1.fbx",                       false),
         (AnimDir + "/death/animation_ybot_death_2.fbx",                       false),
-        (AnimDir + "/aim/animation_ybot_aim_idle.fbx",                        true),
-        (AnimDir + "/aim/animation_ybot_aim_forward.fbx",                     true),
-        (AnimDir + "/aim/animation_ybot_aim_backward.fbx",                    true),
-        (AnimDir + "/aim/animation_ybot_aim_left.fbx",                        true),
-        (AnimDir + "/aim/animation_ybot_aim_right.fbx",                       true),
     };
+
+    // Sets de strafe por postura (puños / melé / arma): idle, forward, backward, left, right.
+    static readonly string[] Stances = { "fists", "melee", "gun" };
+    static readonly string[] AimDirs = { "idle", "forward", "backward", "left", "right" };
 
     // El clip de giro a la derecha es el de la izquierda ESPEJADO (no hay right nativo).
     const string MirrorClip = "animation_ybot_movement_walk_turn_right.fbx";
@@ -55,6 +54,9 @@ public static class PlayerAnimatorSetup
     {
         foreach (var m in Models) SetHumanoid(m, null);
         foreach (var (file, loop) in Anims) SetHumanoid(file, loop);
+        foreach (var s in Stances)
+            foreach (var d in AimDirs)
+                SetHumanoid($"{AnimDir}/aim/{s}/animation_ybot_aim_{s}_{d}.fbx", true);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
@@ -104,6 +106,7 @@ public static class PlayerAnimatorSetup
         controller.AddParameter("Crouch", AnimatorControllerParameterType.Bool);
         controller.AddParameter("Die", AnimatorControllerParameterType.Trigger);
         controller.AddParameter("Aiming", AnimatorControllerParameterType.Bool);
+        controller.AddParameter("AimStance", AnimatorControllerParameterType.Int); // 0 puños,1 melé,2 arma
         controller.AddParameter("AimX", AnimatorControllerParameterType.Float); // strafe -1..+1
         controller.AddParameter("AimY", AnimatorControllerParameterType.Float); // atrás/adelante -1..+1
 
@@ -173,25 +176,33 @@ public static class PlayerAnimatorSetup
         exitCancel.AddCondition(AnimatorConditionMode.If, 0, "Crouch");
         exitCancel.hasExitTime = false; exitCancel.duration = 0.1f;
 
-        // Apuntar/strafe (State of Decay): blend 2D direccional (X=AimX, Y=AimY).
-        // El cuerpo mira a cámara; WASD strafea. Clips en pose de combate (rifle).
-        var aim = controller.CreateBlendTreeInController("Aim", out BlendTree aimTree, 0);
-        aimTree.blendType = BlendTreeType.SimpleDirectional2D;
-        aimTree.blendParameter = "AimX";
-        aimTree.blendParameterY = "AimY";
-        aimTree.AddChild(LoadClip(AnimDir + "/aim/animation_ybot_aim_idle.fbx"),     new Vector2( 0f,  0f));
-        aimTree.AddChild(LoadClip(AnimDir + "/aim/animation_ybot_aim_forward.fbx"),  new Vector2( 0f,  1f));
-        aimTree.AddChild(LoadClip(AnimDir + "/aim/animation_ybot_aim_backward.fbx"), new Vector2( 0f, -1f));
-        aimTree.AddChild(LoadClip(AnimDir + "/aim/animation_ybot_aim_left.fbx"),     new Vector2(-1f,  0f));
-        aimTree.AddChild(LoadClip(AnimDir + "/aim/animation_ybot_aim_right.fbx"),    new Vector2( 1f,  0f));
+        // Apuntar/strafe (State of Decay): un blend 2D direccional POR POSTURA
+        // (puños=0, melé=1, arma=2). El cuerpo mira a cámara; WASD strafea.
+        // AnyState entra a la postura correcta según Aiming + AimStance; al soltar
+        // clic derecho o cambiar de postura, AnyState reevalúa.
+        for (int i = 0; i < Stances.Length; i++)
+        {
+            string s = Stances[i];
+            var aim = controller.CreateBlendTreeInController("Aim_" + s, out BlendTree t, 0);
+            t.blendType = BlendTreeType.SimpleDirectional2D;
+            t.blendParameter = "AimX";
+            t.blendParameterY = "AimY";
+            string p = $"{AnimDir}/aim/{s}/animation_ybot_aim_{s}_";
+            t.AddChild(LoadClip(p + "idle.fbx"),     new Vector2( 0f,  0f));
+            t.AddChild(LoadClip(p + "forward.fbx"),  new Vector2( 0f,  1f));
+            t.AddChild(LoadClip(p + "backward.fbx"), new Vector2( 0f, -1f));
+            t.AddChild(LoadClip(p + "left.fbx"),     new Vector2(-1f,  0f));
+            t.AddChild(LoadClip(p + "right.fbx"),    new Vector2( 1f,  0f));
 
-        // Entrar a apuntar desde cualquier estado; salir al soltar clic derecho.
-        var toAim = sm.AddAnyStateTransition(aim);
-        toAim.AddCondition(AnimatorConditionMode.If, 0, "Aiming");
-        toAim.hasExitTime = false; toAim.duration = 0.12f; toAim.canTransitionToSelf = false;
-        var fromAim = aim.AddTransition(loco);
-        fromAim.AddCondition(AnimatorConditionMode.IfNot, 0, "Aiming");
-        fromAim.hasExitTime = false; fromAim.duration = 0.12f;
+            var toAim = sm.AddAnyStateTransition(aim);
+            toAim.AddCondition(AnimatorConditionMode.If, 0, "Aiming");
+            toAim.AddCondition(AnimatorConditionMode.Equals, i, "AimStance");
+            toAim.hasExitTime = false; toAim.duration = 0.12f; toAim.canTransitionToSelf = false;
+
+            var fromAim = aim.AddTransition(loco);
+            fromAim.AddCondition(AnimatorConditionMode.IfNot, 0, "Aiming");
+            fromAim.hasExitTime = false; fromAim.duration = 0.12f;
+        }
 
         // Muerte: desde cualquier estado al disparar "Die" (PlayerHealth). No vuelve.
         var death = sm.AddState("Death");
