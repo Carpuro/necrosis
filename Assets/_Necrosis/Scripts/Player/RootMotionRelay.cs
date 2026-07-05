@@ -15,18 +15,29 @@ using UnityEngine;
 public class RootMotionRelay : MonoBehaviour
 {
     Animator anim;
+    Vector3 fixedLocalPos;
 
     /// <summary>Rotación del root este frame (para girar el cuerpo con la animación).</summary>
     public Quaternion DeltaRotation { get; private set; } = Quaternion.identity;
     /// <summary>Desplazamiento del root este frame (por si se quiere usar en giros).</summary>
     public Vector3 DeltaPosition { get; private set; }
 
-    void Awake() => anim = GetComponent<Animator>();
+    void Awake()
+    {
+        anim = GetComponent<Animator>();
+        fixedLocalPos = transform.localPosition; // el modelo NUNCA debe alejarse del padre
+    }
 
     void OnAnimatorMove()
     {
         if (anim == null) return;
+        // Captura el root motion SOLO para exponerlo (lo aplica PlayerController al
+        // padre cuando toca). El modelo NO debe moverse por su cuenta: se pega al
+        // padre cada frame, si no, deriva de la cápsula (la cámara sigue al padre)
+        // y luego reaparece de golpe en el origen.
         DeltaRotation = anim.deltaRotation;
         DeltaPosition = anim.deltaPosition;
+        transform.localPosition = fixedLocalPos;
+        transform.localRotation = Quaternion.identity;
     }
 }
