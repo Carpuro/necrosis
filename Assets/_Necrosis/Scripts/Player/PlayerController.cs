@@ -229,6 +229,7 @@ public class PlayerController : MonoBehaviour
 
         rolling = true;
         rollTimer = 0f;
+        discreteTurning = false; turning180 = false; // roll cleanly overrides any turn
 
         // Roll toward input direction, or straight ahead if idle.
         Vector3 wish = cameraTransform != null
@@ -269,7 +270,9 @@ public class PlayerController : MonoBehaviour
     {
         // Strafe only while aiming (right mouse), works in any stance. Normal
         // movement turns to face the move direction instead of strafing.
-        Aiming = input.AimHeld && cameraTransform != null;
+        // Suppress aim while a turn is running so aim/turn don't flicker against each
+        // other when inputs are spammed (one action at a time).
+        Aiming = input.AimHeld && cameraTransform != null && !discreteTurning && !turning180;
         StrafeLock = false;                       // no auto-strafe
         faceCamera = Aiming;
         crouched = crouchToggled && !Aiming;      // aiming forces standing
@@ -342,9 +345,8 @@ public class PlayerController : MonoBehaviour
         animAimX = animAimY = 0f;
         if (cameraTransform == null) return;
 
-        // A discrete turn always completes (even a quick tap). Only aim/crouch abort it.
-        if (discreteTurning && (faceCamera || crouched)) discreteTurning = false;
-
+        // A discrete turn ALWAYS completes (even a quick tap or spammed inputs) so it
+        // can't flicker against walk/aim/roll. Aim is already suppressed while turning.
         if (discreteTurning) UpdateDiscreteTurn();      // gates movement like the 180
         else if (faceCamera) AimMovement();
         else if (moving) GroundMovement();
@@ -424,7 +426,7 @@ public class PlayerController : MonoBehaviour
     /// Compares against lastMoveDir (persists through pauses), not current facing.</summary>
     void TryTrigger180(Vector3 worldDir)
     {
-        if (turning180) return;
+        if (turning180 || discreteTurning) return;
         if (Vector3.Angle(lastMoveDir, worldDir) <= turn180Threshold) return;
 
         turning180 = true;
