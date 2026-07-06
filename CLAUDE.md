@@ -40,18 +40,51 @@ de patrulla, `obstacleMask` = Default) y clip de estática placeholder
 - Proyecto Unity generado por batchmode; escena fase 0 completa (commit 6dbefc0).
 - Todo pusheado a github.com/Carpuro/necrosis (rama main).
 
-### Pendiente
-1. **Carlos prueba la escena en el editor** (Play en Fase0.unity): validar que
-   patrulla/flanqueo de día, congelación a las 19:00, frenesí nocturno y Marea
-   del Alba se SIENTEN. Tunear valores en el Inspector, no en código.
-2. Borrar la carpeta vacía `Necrosis/` de la raíz (proyecto duplicado de Unity Hub,
-   ya vaciado y gitignoreado; el directorio quedó bloqueado por Unity Hub —
-   quitarlo de la lista de proyectos del Hub o borrar tras reiniciar).
-   El proyecto REAL se abre desde la raíz del repo.
-3. Commitear `ProjectSettings/PackageManagerSettings.asset` (lo generó el editor).
-4. Sustituir el clip de estática por uno con carácter (freesound.org) al pulir audio.
-5. **Siguiente hito aprobado: melé del jugador (fase 0.5)** — empezar cuando
-   Carlos lo pida.
+### Player locomotion + jump (2026-07-06) — UNCOMMITTED, needs a commit
+Big pass on the player controller (all English code/comments now). State machine files:
+`PlayerInput`, `PlayerController`, `PlayerAnimatorDriver`, and the editor
+`PlayerAnimatorSetup` (builds `PlayerAnimator.controller` — run menu **Necrosis > Setup
+animación del Jugador** after any change to it; version stamp logs `Setup v7` in Console).
+
+- **Turns finished**: idle discrete turns (90/180) + moving turns + 180. Turn blend is
+  driven by the body's yaw-rate (capped by `maxTurnSpeed`) with a `turnDeadzone`, so a
+  turn is a sustained, animated rotation (not an instant snap). Chained/interrupted turns
+  serialize through a single-slot queue with a `maxQueuedTurns` cap. Walk turns use
+  `..._briefcase` clips (native L+R, correct feet — the old mirror stuttered); run-left is
+  the mirrored right with `cycleOffset 0.5` to realign the feet.
+  - GOTCHA (cost hours): never reassign `BlendTree.children` — the setter wipes
+    FreeformCartesian2D child positions to (0,0) and collapses the blend (all turns die).
+    Edit child timeScale/cycleOffset via `SerializedObject` (see `TweakChildren` history)
+    or set positions only through `AddChild`.
+- **Walk-start step-off**: speed is live-tunable via `walkStartAnimSpeed` (Inspector) →
+  animator `WalkStartSpeed` param. NO step-off after a discrete turn (it doubled the motion
+  = spasm); the turn flows straight into locomotion.
+- **JUMP (new feature, approved by Carlos)**: **Space = jump**; **Ctrl while running = dodge
+  roll** (Ctrl otherwise = crouch toggle). Idle: single Space = low jump, double-tap =
+  high jump, both in place (no horizontal move). Moving (walk/run): `jump_run` clip,
+  launches IMMEDIATELY (no windup), carries momentum. Standing jumps use a windup that
+  launches on the clip's takeoff (`jumpTakeoffNormalized`, driven by clip normalizedTime).
+  Jump state exits on landing via the `Grounded` bool (not a timer). Clips: 5 wired
+  (low/high/forward/backward/run) + 2 spares (`jump_race_obstacle`, `jump_vault_acrobatic`
+  — deferred, need obstacle detection). `jump_idle_forward/backwards` are spares now too
+  (moving jump uses run clip).
+
+### Pendiente / roadmap
+1. **COMMIT the locomotion+jump work** (uncommitted). Include the jump + `..._briefcase`
+   clips (+ `.meta`). **Do NOT commit `Materials/ar15.glb`** (weapon asset in the wrong
+   folder → belongs in `necrosis-external-assets/`, import only when a weapon system
+   exists; the 9-mm pack once crashed the editor UI). `animation_ybot_idle_movement_sprint.fbx`
+   is a loose spare — decide before staging.
+2. **Play-test tuning** (Inspector, not code): jump feel (`jumpSpeed`, `jumpSpeedHigh`,
+   `jumpTakeoffNormalized`, `jumpDoubleTapWindow`), turn feel (`maxTurnSpeed`,
+   `turnRateForFullBlend`, `turnDeadzone`), walk-start (`walkStartAnimSpeed`).
+3. Original phase-0 goal still stands: cross the map at night and feel TENSION (day
+   patrol/flank, 19:00 freeze, night frenzy, Dawn Surge). Tune Inspector values.
+4. Borrar la carpeta vacía `Necrosis/` de la lista de Unity Hub si reaparece.
+5. Sustituir el clip de estática por uno con carácter (freesound.org) al pulir audio.
+6. **Siguiente hito aprobado: melé del jugador (fase 0.5)** — empezar cuando Carlos lo pida.
+7. Posibles mejoras futuras del salto: air-loop/land por `Grounded` (hoy el clip one-shot
+   puede terminar antes de aterrizar desde alto); vault/obstacle con detección de obstáculos.
 
 ## Estructura
 
@@ -71,11 +104,12 @@ y los componentes del Player (encontrado por **tag "Player"** — obligatorio en
 
 ## Convenciones
 
-- C# estándar de Unity; **comentarios, mensajes de commit y docs en español**.
+- C# estándar de Unity; **código, comentarios, mensajes de commit y docs en INGLÉS**
+  (todo en inglés de aquí en adelante; el historial de git existente se queda como está).
 - Un script = una responsabilidad. Nada de god-classes.
 - **Todos los valores de gameplay expuestos en el Inspector** (`[SerializeField]` o
   públicos) para tunear sin recompilar. Nunca hardcodear números de tuning.
-- Commits pequeños y frecuentes, mensajes en español.
+- Commits pequeños y frecuentes, mensajes en inglés.
 - El `.gitignore` de Unity está en la raíz: `Library/`, `Temp/`, `Obj/`, `Logs/`,
   `UserSettings/`, `Build*/` JAMÁS se versionan. Verificarlo antes de cualquier commit
   que toque estructura.

@@ -21,8 +21,8 @@ public class PlayerInput : MonoBehaviour
     public float MouseX { get; private set; }       // horizontal mouse delta (180 side)
 
     public bool RunTogglePressed { get; private set; }    // C down
-    public bool CrouchTogglePressed { get; private set; } // Ctrl down
-    public bool RollPressed { get; private set; }          // Space down
+    public bool CrouchPressed { get; private set; }        // Ctrl down (crouch, or roll while running)
+    public bool JumpPressed { get; private set; }          // Space down
 
     /// <summary>Stance key pressed this frame: 0 fists · 1 melee · 2 gun · -1 none.</summary>
     public int StancePressed { get; private set; }
@@ -38,8 +38,8 @@ public class PlayerInput : MonoBehaviour
         MouseX = Input.GetAxis("Mouse X");
 
         RunTogglePressed = Input.GetKeyDown(KeyCode.C);
-        CrouchTogglePressed = Input.GetKeyDown(KeyCode.LeftControl);
-        RollPressed = Input.GetKeyDown(KeyCode.Space);
+        CrouchPressed = Input.GetKeyDown(KeyCode.LeftControl);
+        JumpPressed = Input.GetKeyDown(KeyCode.Space);
 
         StancePressed = Input.GetKeyDown(KeyCode.Alpha1) ? 0
                       : Input.GetKeyDown(KeyCode.Alpha2) ? 1

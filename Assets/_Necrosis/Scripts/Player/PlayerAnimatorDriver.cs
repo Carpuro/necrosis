@@ -21,7 +21,7 @@ public class PlayerAnimatorDriver : MonoBehaviour
     {
         "Locomotion", "Crouch", "CrouchEnter", "CrouchExit", "WalkStart",
         "TurnInPlace", "Turn180", "Aim_fists", "Aim_melee", "Aim_gun",
-        "Strafe", "Roll", "Death",
+        "Strafe", "Roll", "Death", "Jump",
     };
     readonly Dictionary<int, string> stateNames = new();
 
@@ -59,6 +59,8 @@ public class PlayerAnimatorDriver : MonoBehaviour
         public bool turningInPlace;
         public float turnInPlaceDir;   // -1..+1
         public bool startWalk;         // one-shot trigger
+        public float walkStartSpeed;   // playback speed of the step-off clip
+        public bool grounded;          // false while airborne (exits the Jump state on landing)
         public bool turn180;           // one-shot trigger
         public float turn180Tier;      // 0 idle · 1 walk · 2 run
         public float turn180Dir;       // -1 left · +1 right
@@ -90,6 +92,12 @@ public class PlayerAnimatorDriver : MonoBehaviour
         animator.SetFloat("TurnInPlace", f.turnInPlaceDir, 0.08f, dt);
         animator.SetFloat("TurnInPlaceSpeed", f.turnInPlaceSpeed);
 
+        // Step-off playback speed (tunable live from PlayerController).
+        if (f.walkStartSpeed > 0f) animator.SetFloat("WalkStartSpeed", f.walkStartSpeed);
+
+        // Grounded drives the jump→locomotion exit (land = leave the jump clip).
+        animator.SetBool("Grounded", f.grounded);
+
         // One-shot triggers detected this frame.
         if (f.startWalk) animator.SetTrigger("StartWalk");
         if (f.turn180) animator.SetTrigger("Turn180");
@@ -112,10 +120,28 @@ public class PlayerAnimatorDriver : MonoBehaviour
         return true;
     }
 
+    /// <summary>Force the in-place turn state to replay from frame 0. Called when a new
+    /// discrete turn starts so a chained/interrupted turn gets a clean anticipation and
+    /// a fresh normalizedTime (otherwise the state keeps accumulating time and the body
+    /// rotation, which is synced to that time, snaps around instantly).</summary>
+    public void RestartTurnInPlace()
+    {
+        if (animator != null) animator.Play("TurnInPlace", 0, 0f);
+    }
+
     /// <summary>Fires the dodge-roll animation (roll starts outside the Apply path).</summary>
     public void PlayRoll()
     {
         if (animator != null) animator.SetTrigger("Roll");
+    }
+
+    /// <summary>Fires a jump. type: 0 neutral · 1 forward · 2 backward · 3 running —
+    /// selects the clip via the JumpType 1D blend in the Jump state.</summary>
+    public void PlayJump(int type)
+    {
+        if (animator == null) return;
+        animator.SetInteger("JumpType", type);
+        animator.SetTrigger("Jump");
     }
 
     /// <summary>Fires the death animation (called by PlayerHealth).</summary>

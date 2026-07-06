@@ -31,6 +31,10 @@ public static class PlayerAnimatorSetup
         (AnimDir + "/locomotion/animation_ybot_movement_walk_straight.fbx",   true),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left.fbx",  true),
         (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right.fbx", true),
+        // Briefcase walk-turn clips (correct FEET/body, native L+R). Used for the walk
+        // turns for now; the arms carry a briefcase — arm cleanup deferred.
+        (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left_briefcase.fbx",  true),
+        (AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right_briefcase.fbx", true),
         (AnimDir + "/locomotion/animation_ybot_movement_run_turn_left.fbx",   true),
         (AnimDir + "/locomotion/animation_ybot_movement_run_turn_right.fbx",  true),
         (AnimDir + "/locomotion/animation_ybot_idle_movement_turn_left_180.fbx",  false),
@@ -51,6 +55,12 @@ public static class PlayerAnimatorSetup
         (AnimDir + "/locomotion/animation_ybot_movement_jog_strafe_left.fbx",   true),
         (AnimDir + "/locomotion/animation_ybot_movement_jog_strafe_right.fbx",  true),
         (AnimDir + "/locomotion/animation_ybot_run_movement_roll_straight.fbx", false), // esquiva
+        // Jump clips (one-shot). 0 neutral · 1 forward · 2 backward · 3 running. low = spare.
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_high.fbx",      false),
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_forward.fbx",   false),
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_backwards.fbx", false),
+        (AnimDir + "/locomotion/animation_ybot_run_movement_jump_run.fbx",             false),
+        (AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_low.fbx",       false),
         (AnimDir + "/locomotion/animation_ybot_crouch_idle.fbx",              true),
         (AnimDir + "/locomotion/animation_ybot_crouch_movement_straight.fbx", true),
         (AnimDir + "/locomotion/animation_ybot_standing_movement_crouch.fbx", false), // entrar a agacharse
@@ -76,11 +86,27 @@ public static class PlayerAnimatorSetup
         "animation_ybot_movement_run_turn_180_left.fbx",
     };
 
+    // Mirroring a looping gait flips its footfall half a cycle out of phase, so the
+    // mirrored run-left stutters against run_straight (the native right is clean).
+    // cycleOffset 0.5 shifts the loop start half a cycle to realign the feet. This is
+    // only valid because the run clips share run_straight's cycle length (a fixed
+    // offset on mismatched lengths drifts and pops — that's why the old walk-turn
+    // offset attempt failed; walk turns now use native clips instead).
+    static readonly (string file, float offset)[] CycleOffsetClips =
+    {
+        ("animation_ybot_movement_run_turn_left.fbx", 0.5f),
+    };
+
     const string YBotModel = PlayerDir + "/Models/model_y_bot_tpose.fbx";
 
     [MenuItem("Necrosis/Setup animación del Jugador")]
     public static void Run()
     {
+        // 0) Import any newly-dropped .fbx first so SetHumanoid never skips a clip that
+        //    Unity hasn't imported yet. Makes a single rebuild self-sufficient (no need
+        //    to focus the editor first).
+        AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
         // 1) Modelos: avatar Humanoid creado desde sí mismos.
         foreach (var m in Models) SetHumanoid(m, null, null);
         AssetDatabase.SaveAssets();
@@ -99,7 +125,9 @@ public static class PlayerAnimatorSetup
         AssetDatabase.Refresh();
 
         BuildController();
-        Debug.Log("[NECROSIS] Setup de animación del Jugador completado.");
+        // Version stamp: bump when the controller layout changes, so a stale build is
+        // obvious in the Console (run-before-compile-finished has bitten us already).
+        Debug.Log("[NECROSIS] Setup v7 (jump exits on landing via Grounded) completado."); // controller unchanged since v7
     }
 
     static Avatar LoadAvatar(string modelPath)
@@ -112,6 +140,13 @@ public static class PlayerAnimatorSetup
     static void SetHumanoid(string path, bool? loop, Avatar sourceAvatar)
     {
         var imp = AssetImporter.GetAtPath(path) as ModelImporter;
+        if (imp == null)
+        {
+            // Not imported yet (just dropped in) — force a synchronous import and retry so
+            // the rebuild handles new clips without needing the editor focused first.
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
+            imp = AssetImporter.GetAtPath(path) as ModelImporter;
+        }
         if (imp == null) { Debug.LogWarning($"[NECROSIS] No es modelo importable: {path}"); return; }
 
         imp.animationType = ModelImporterAnimationType.Human;
@@ -130,13 +165,16 @@ public static class PlayerAnimatorSetup
         }
 
         bool mirror = System.Array.Exists(MirrorClips, m => path.EndsWith(m));
-        if (loop.HasValue || mirror)
+        float cycleOffset = 0f;
+        foreach (var c in CycleOffsetClips) if (path.EndsWith(c.file)) cycleOffset = c.offset;
+        if (loop.HasValue || mirror || cycleOffset != 0f)
         {
             var clips = imp.defaultClipAnimations;
             for (int i = 0; i < clips.Length; i++)
             {
                 if (loop.HasValue) clips[i].loopTime = loop.Value;
-                if (mirror) clips[i].mirror = true; // giro derecha = izquierda espejado
+                if (mirror) clips[i].mirror = true; // right turn = mirrored left (and vice versa)
+                if (cycleOffset != 0f) clips[i].cycleOffset = cycleOffset; // realign mirrored feet
             }
             if (clips.Length > 0) imp.clipAnimations = clips;
         }
@@ -164,8 +202,12 @@ public static class PlayerAnimatorSetup
         controller.AddParameter("TurnInPlaceSpeed", AnimatorControllerParameterType.Float); // multiplicador (90=2, 180=4)
         controller.AddParameter("Aiming", AnimatorControllerParameterType.Bool);
         controller.AddParameter("StrafeLock", AnimatorControllerParameterType.Bool); // strafe libre (Left Alt)
-        controller.AddParameter("Roll", AnimatorControllerParameterType.Trigger);    // esquiva (Espacio)
+        controller.AddParameter("Roll", AnimatorControllerParameterType.Trigger);    // esquiva (Ctrl al correr)
+        controller.AddParameter("Jump", AnimatorControllerParameterType.Trigger);    // salto (Espacio)
+        controller.AddParameter("JumpType", AnimatorControllerParameterType.Float);  // 0 low/1 high/2 fwd/3 back/4 run
+        controller.AddParameter("Grounded", AnimatorControllerParameterType.Bool);   // en el suelo (sale del salto al aterrizar)
         controller.AddParameter("StartWalk", AnimatorControllerParameterType.Trigger); // arranque idle->caminar
+        controller.AddParameter("WalkStartSpeed", AnimatorControllerParameterType.Float); // playback speed of the step-off (tunable)
         controller.AddParameter("Turn180", AnimatorControllerParameterType.Trigger);   // giro 180 al invertir
         controller.AddParameter("Turn180Dir", AnimatorControllerParameterType.Float);  // -1 izq / +1 der
         controller.AddParameter("Turn180Tier", AnimatorControllerParameterType.Float); // 0 idle / 1 caminar / 2 correr
@@ -175,30 +217,24 @@ public static class PlayerAnimatorSetup
 
         var sm = controller.layers[0].stateMachine;
 
-        // Locomoción de pie: blend 2D (X=Turn, Y=Speed). idle->walk->run recto y
-        // giros a izq/der al caminar y correr (giro derecha = izquierda espejado).
-        var loco = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
-        tree.blendType = BlendTreeType.FreeformCartesian2D; // locomoción: Turn/Speed (funciona)
-        tree.blendParameter = "Turn";    // X
-        tree.blendParameterY = "Speed";  // Y
+        // Shared locomotion clips (idle + walkS also feed TurnInPlace and strafe below).
         var idle    = LoadClip(AnimDir + "/locomotion/animation_ybot_idle.fbx");
         var walkS   = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_straight.fbx");
-        var walkL   = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left.fbx");
-        var walkR   = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right.fbx");
         var runS    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_run_straight.fbx");
         var runL    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_run_turn_left.fbx");
         var runR    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_run_turn_right.fbx");
         var runF    = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_sprint_straight.fbx");
-        tree.AddChild(idle,  new Vector2( 0f, 0f));
-        tree.AddChild(walkS, new Vector2( 0f, 2.5f)); // walk (C off) = walkSpeed
-        tree.AddChild(walkL, new Vector2(-1f, 2.5f)); // giro izq caminando
-        tree.AddChild(walkR, new Vector2( 1f, 2.5f)); // giro der caminando
-        tree.AddChild(runS,  new Vector2( 0f, 6.5f)); // run (C on)
-        tree.AddChild(runL,  new Vector2(-1f, 6.5f)); // giro izq corriendo (nativo)
-        tree.AddChild(runR,  new Vector2( 1f, 6.5f)); // giro der corriendo (nativo)
-        tree.AddChild(runF,  new Vector2( 0f, 8f));   // sprint (Shift)
-        tree.AddChild(runL,  new Vector2(-1f, 8f));   // giro izq esprintando
-        tree.AddChild(runR,  new Vector2( 1f, 8f));   // giro der esprintando
+        // Walk turns — KNOWN-GOOD combo: left = the plain walk_turn_left clip (looked
+        // right in play), right = the NATIVE briefcase right clip (fills the hole the
+        // bad mirrored right left behind; carries a briefcase in hand — arm cleanup
+        // deferred). No timeScale/cycleOffset tricks: playing the turn clips at their
+        // natural speed is what looked correct in play.
+        var walkL = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_turn_left.fbx");
+        var walkR = LoadClip(AnimDir + "/locomotion/animation_ybot_movement_walk_turn_right_briefcase.fbx");
+
+        // Locomotion 2D blend (X=Turn, Y=Speed). idle->walk->run + walk/run turns.
+        var loco = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
+        FillLocoTree(tree, idle, walkS, walkL, walkR, runS, runL, runR, runF);
         sm.defaultState = loco;
 
         // Agachado: blend por Speed (crouch_idle quieto -> crouch_walking en movimiento)
@@ -245,7 +281,11 @@ public static class PlayerAnimatorSetup
         // clip de arranque y luego entra a locomoción. Trigger StartWalk.
         var walkStart = sm.AddState("WalkStart");
         walkStart.motion = LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_walking.fbx");
-        walkStart.speed = 2f; // el doble de rápido (pedido de Carlos)
+        // Playback speed driven by the WalkStartSpeed param so it's tunable live from the
+        // PlayerController Inspector (walkStartAnimSpeed) — 8x looked like a spasm.
+        walkStart.speed = 1f;
+        walkStart.speedParameterActive = true;
+        walkStart.speedParameter = "WalkStartSpeed";
         var toWalkStart = loco.AddTransition(walkStart);
         toWalkStart.AddCondition(AnimatorConditionMode.If, 0, "StartWalk");
         toWalkStart.hasExitTime = false; toWalkStart.duration = 0.05f;
@@ -291,9 +331,15 @@ public static class PlayerAnimatorSetup
         tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_turn_right_90.fbx"),   1f);
         tip.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_turn_right_180.fbx"),  2f);
 
-        var toTurnIP = loco.AddTransition(turnIP);
+        // Enter from AnyState (not just Locomotion) so an in-place turn can interrupt
+        // the WalkStart step-off too. If it could only be reached from Locomotion, a
+        // quick forward-then-reverse (W→S) left the animator stuck in WalkStart playing
+        // the whole step-off clip while the body tried to turn — looked like sliding
+        // forward instead of pivoting. canTransitionToSelf=false so a chained turn
+        // doesn't re-enter here (RestartTurnInPlace handles the clean replay).
+        var toTurnIP = sm.AddAnyStateTransition(turnIP);
         toTurnIP.AddCondition(AnimatorConditionMode.If, 0, "TurningInPlace");
-        toTurnIP.hasExitTime = false; toTurnIP.duration = 0.1f;
+        toTurnIP.hasExitTime = false; toTurnIP.duration = 0.1f; toTurnIP.canTransitionToSelf = false;
         var fromTurnIP = turnIP.AddTransition(loco);
         fromTurnIP.AddCondition(AnimatorConditionMode.IfNot, 0, "TurningInPlace");
         fromTurnIP.hasExitTime = false; fromTurnIP.duration = 0.1f;
@@ -354,6 +400,29 @@ public static class PlayerAnimatorSetup
         var fromRoll = roll.AddTransition(loco);
         fromRoll.hasExitTime = true; fromRoll.exitTime = 0.85f; fromRoll.duration = 0.1f;
 
+        // Salto (Space): 1D blend by JumpType picks the clip (0 low/1 high/2 fwd/3 back/4 run).
+        // AnyState → Jump on the Jump trigger; the clip plays as a one-shot while gravity
+        // does the arc, then exits back to locomotion. (Uses the same 1D-select pattern as
+        // TurnInPlace; useAutomaticThresholds off so JumpType 0..4 map to the real clips.)
+        var jump = controller.CreateBlendTreeInController("Jump", out BlendTree jtree, 0);
+        jtree.blendType = BlendTreeType.Simple1D;
+        jtree.blendParameter = "JumpType";
+        jtree.useAutomaticThresholds = false;
+        jtree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_low.fbx"),       0f);
+        jtree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_high.fbx"),      1f);
+        jtree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_forward.fbx"),   2f);
+        jtree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_idle_movement_jump_idle_backwards.fbx"), 3f);
+        jtree.AddChild(LoadClip(AnimDir + "/locomotion/animation_ybot_run_movement_jump_run.fbx"),             4f);
+        var toJump = sm.AddAnyStateTransition(jump);
+        toJump.AddCondition(AnimatorConditionMode.If, 0, "Jump");
+        toJump.hasExitTime = false; toJump.duration = 0.08f; toJump.canTransitionToSelf = false;
+        // Exit the jump the moment we LAND (Grounded true), not on a fixed timer — otherwise
+        // the clip keeps playing after touchdown (or gets cut mid-air). Grounded is false
+        // from takeoff until landing, so this only fires when we're actually back on ground.
+        var fromJump = jump.AddTransition(loco);
+        fromJump.AddCondition(AnimatorConditionMode.If, 0, "Grounded");
+        fromJump.hasExitTime = false; fromJump.duration = 0.12f;
+
         // Muerte: desde cualquier estado al disparar "Die" (PlayerHealth). No vuelve.
         var death = sm.AddState("Death");
         death.motion = LoadClip(AnimDir + "/death/animation_ybot_death_1.fbx"); // 1ª variante
@@ -365,4 +434,30 @@ public static class PlayerAnimatorSetup
 
         AssetDatabase.SaveAssets();
     }
+
+    /// <summary>Fills a locomotion 2D blend (X=Turn, Y=Speed) with the shared clips and
+    /// the given walk-turn clips. IMPORTANT: only AddChild (which sets each child's 2D
+    /// position) is used — do NOT read/modify/reassign tree.children afterward, because
+    /// the BlendTree.children setter wipes FreeformCartesian2D positions back to (0,0),
+    /// collapsing the whole blend so no walk/run turn cell is reachable.</summary>
+    static void FillLocoTree(BlendTree tree, AnimationClip idle, AnimationClip walkS,
+                             Motion turnL, Motion turnR,
+                             AnimationClip runS, AnimationClip runL, AnimationClip runR, AnimationClip runF)
+    {
+        tree.blendType = BlendTreeType.FreeformCartesian2D;
+        tree.blendParameter = "Turn";    // X
+        tree.blendParameterY = "Speed";  // Y
+        tree.AddChild(idle,  new Vector2( 0f, 0f));
+        tree.AddChild(walkS, new Vector2( 0f, 2.5f)); // walk (C off) = walkSpeed
+        tree.AddChild(turnL, new Vector2(-1f, 2.5f)); // walk turn left
+        tree.AddChild(turnR, new Vector2( 1f, 2.5f)); // walk turn right
+        tree.AddChild(runS,  new Vector2( 0f, 6.5f)); // run (C on)
+        tree.AddChild(runL,  new Vector2(-1f, 6.5f)); // run turn left
+        tree.AddChild(runR,  new Vector2( 1f, 6.5f)); // run turn right
+        tree.AddChild(runF,  new Vector2( 0f, 8f));   // sprint (Shift)
+        tree.AddChild(runL,  new Vector2(-1f, 8f));   // sprint turn left
+        tree.AddChild(runR,  new Vector2( 1f, 8f));   // sprint turn right
+    }
+
+
 }
